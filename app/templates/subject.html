@@ -42,4 +42,57 @@
     <button type="submit" class="primary">Add chapter</button>
   </form>
 </div>
+
+<h2>Reference material</h2>
+<p class="muted">Documents and links your questions are drawn from. PDFs and text
+  files can be used for AI generation; everything stays here so you can trace a
+  question back to where it came from.</p>
+{% if sources %}
+<div class="cards">
+  {% for s in sources %}
+  <div class="card">
+    <div class="row-between">
+      <span>
+        {% if s.kind == 'file' %}📄{% elif s.kind == 'url' %}🔗{% else %}📝{% endif %}
+        <a href="/sources/{{ s.id }}" target="_blank">{{ s.title }}</a>
+      </span>
+      {% if is_admin %}
+      <form method="post" action="/sources/{{ s.id }}/delete"
+            onsubmit="return confirm('Delete this source? Questions stay but lose their link.')">
+        <button class="btn small danger">Delete</button>
+      </form>
+      {% endif %}
+    </div>
+    <p class="muted small">
+      {% if s.kind == 'file' %}{{ s.filename }}{% if not s.content %} · (no extractable text){% endif %}
+      {% elif s.kind == 'url' %}{{ s.url }}
+      {% else %}pasted text{% endif %}
+    </p>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted">No reference material yet.</p>
+{% endif %}
+
+{% if is_admin %}
+<div class="card">
+  <h3>Add reference material</h3>
+  <form method="post" action="/subjects/{{ subject.id }}/sources" enctype="multipart/form-data" class="stack">
+    <label>Title <span class="muted">(optional)</span>
+      <input name="title" placeholder="e.g. Lab manual — Experiment 1">
+    </label>
+    <label>Upload a file <span class="muted">(PDF, .txt, .md — used for AI generation)</span>
+      <input type="file" name="file">
+    </label>
+    <label>…or a URL <span class="muted">(stored as a reference link)</span>
+      <input name="url" placeholder="https://…">
+    </label>
+    <label>…or paste text
+      <textarea name="content" rows="4" placeholder="Paste source text"></textarea>
+    </label>
+    <button type="submit" class="primary">Add source</button>
+  </form>
+</div>
+{% endif %}
 {% endblock %}

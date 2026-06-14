@@ -39,6 +39,7 @@
     <p class="answer"><strong>Answer:</strong> {{ q.answer }}</p>
     {% endif %}
     {% if q.explanation %}<p class="muted explanation">{{ q.explanation }}</p>{% endif %}
+    {% if q.source_id %}<p class="muted small">📎 Source: <a href="/sources/{{ q.source_id }}" target="_blank">{{ q.source_label }}</a></p>{% endif %}
   </li>
   {% endfor %}
 </ol>

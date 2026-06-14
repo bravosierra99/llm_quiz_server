@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 DB_PATH = os.environ.get("QUIZ_DB_PATH", "/data/quiz.db")
+# Uploaded reference files live next to the DB, on the same persistent volume.
+SOURCES_DIR = str(Path(DB_PATH).parent / "sources")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -35,6 +37,21 @@ CREATE TABLE IF NOT EXISTS chapters (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Reference material a question can be traced back to: a pasted passage, an
+-- uploaded file (saved on the /data volume), or a URL. Provenance so the admin
+-- can verify/curate a question against where it came from.
+CREATE TABLE IF NOT EXISTS sources (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_id  INTEGER REFERENCES subjects(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    kind        TEXT NOT NULL CHECK (kind IN ('text','file','url')),
+    url         TEXT NOT NULL DEFAULT '',     -- kind='url'
+    file_path   TEXT NOT NULL DEFAULT '',     -- kind='file' (absolute path under SOURCES_DIR)
+    filename    TEXT NOT NULL DEFAULT '',     -- kind='file' (original name, for display/download)
+    content     TEXT NOT NULL DEFAULT '',     -- kind='text', or extracted text cache for files
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS questions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     chapter_id  INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
@@ -43,6 +60,7 @@ CREATE TABLE IF NOT EXISTS questions (
     choices     TEXT NOT NULL DEFAULT '[]',   -- JSON list (mcq only)
     answer      TEXT NOT NULL,                -- canonical correct answer text
     explanation TEXT NOT NULL DEFAULT '',
+    source_id   INTEGER REFERENCES sources(id) ON DELETE SET NULL,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -104,9 +122,22 @@ CREATE INDEX IF NOT EXISTS idx_review_question ON review_state(question_id);
 
 def init_db():
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+    Path(SOURCES_DIR).mkdir(parents=True, exist_ok=True)
     with get_conn() as conn:
         conn.executescript(SCHEMA)
         _migrate_legacy_queue(conn)
+        _add_column_if_missing(conn, "questions", "source_id",
+                               "INTEGER REFERENCES sources(id) ON DELETE SET NULL")
+
+
+def _add_column_if_missing(conn, table, column, decl):
+    """Idempotent ALTER TABLE ADD COLUMN. Needed because CREATE TABLE IF NOT
+    EXISTS won't add a new column to a table that already exists in a deployed
+    DB. SQLite allows a REFERENCES clause on an added column only when its
+    default is NULL — which it is here."""
+    cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 def _migrate_legacy_queue(conn):

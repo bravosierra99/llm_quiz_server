@@ -6,7 +6,7 @@
 <p class="muted small">Using <code>{{ ai_model }}</code> at <code>{{ ai_base }}</code>.
    Generated questions go to a review step before they're saved.</p>
 
-<form method="post" action="/chapters/{{ chapter.id }}/generate" class="stack card">
+<form method="post" action="/chapters/{{ chapter.id }}/generate" enctype="multipart/form-data" class="stack card">
   <div class="tabs">
     <label class="radio"><input type="radio" name="mode" value="topic" checked onchange="syncMode()"> From a topic / prompt</label>
     <label class="radio"><input type="radio" name="mode" value="source" onchange="syncMode()"> From source material</label>
@@ -17,10 +17,31 @@
       placeholder="e.g. Key things a 10-year-old should learn from Arduino experiments 1-3: LEDs, resistors, digitalWrite, breadboards"></textarea>
   </label>
 
-  <label id="source-field" style="display:none">Source material
-    <textarea name="source_text" rows="10"
-      placeholder="Paste the chapter text, lab instructions, notes, etc. Questions will be drawn only from this."></textarea>
-  </label>
+  <div id="source-field" style="display:none" class="stack">
+    {% if sources %}
+    <label>Use an existing source
+      <select name="existing_source_id">
+        <option value="">— new material below —</option>
+        {% for s in sources %}
+          {% if s.kind != 'url' %}
+          <option value="{{ s.id }}">{{ s.title }}{% if not s.content %} (no text){% endif %}</option>
+          {% endif %}
+        {% endfor %}
+      </select>
+    </label>
+    <p class="muted small">…or add new material (it'll be saved as a source and linked to the questions):</p>
+    {% endif %}
+    <label>Title <span class="muted">(optional)</span>
+      <input name="source_title" placeholder="e.g. Lab manual — Experiment 1">
+    </label>
+    <label>Upload a file <span class="muted">(PDF, .txt, .md)</span>
+      <input type="file" name="source_file">
+    </label>
+    <label>…or paste source text
+      <textarea name="source_text" rows="8"
+        placeholder="Paste the chapter text, lab instructions, notes, etc. Questions will be drawn only from this."></textarea>
+    </label>
+  </div>
 
   <div class="grid-3">
     <label>How many

@@ -7,12 +7,12 @@ on any device with no build step. Routes are grouped: identity, library
 import json
 import os
 
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import ai, auth, scheduler
+from . import ai, auth, scheduler, sources
 from .db import get_conn, init_db, jloads
 
 BASE_DIR = os.path.dirname(__file__)
@@ -138,7 +138,9 @@ def view_subject(request: Request, subject_id: int):
         """, (subject_id,))]
         for c in chapters:
             c["progress"] = scheduler.chapter_progress(conn, user["id"], c["id"])
-    return render(request, "subject.html", subject=dict(subject), chapters=chapters)
+        source_list = sources.list_for_subject(conn, subject_id)
+    return render(request, "subject.html", subject=dict(subject), chapters=chapters,
+                  sources=source_list, is_admin=bool(user.get("is_admin")))
 
 
 @app.post("/subjects/{subject_id}/chapters")
@@ -174,10 +176,18 @@ def view_chapter(request: Request, chapter_id: int):
         """, (chapter_id,)).fetchone()
         if not chapter:
             return RedirectResponse("/", status_code=303)
-        questions = [dict(r) for r in conn.execute(
-            "SELECT * FROM questions WHERE chapter_id = ? ORDER BY id", (chapter_id,))]
+        questions = [dict(r) for r in conn.execute("""
+            SELECT q.*, src.title AS source_title, src.kind AS source_kind,
+                   src.filename AS source_filename, src.url AS source_url
+            FROM questions q LEFT JOIN sources src ON q.source_id = src.id
+            WHERE q.chapter_id = ? ORDER BY q.id
+        """, (chapter_id,))]
     for q in questions:
         q["choices"] = jloads(q["choices"])
+        q["source_label"] = sources.label(
+            {"kind": q["source_kind"], "title": q["source_title"],
+             "filename": q["source_filename"], "url": q["source_url"]}
+        ) if q["source_id"] else ""
     return render(request, "chapter.html", chapter=dict(chapter), questions=questions)
 
 
@@ -193,6 +203,65 @@ def delete_chapter(request: Request, chapter_id: int):
 
 
 # --------------------------------------------------------------------------
+# Reference material (sources) — provenance a question can be traced back to
+# --------------------------------------------------------------------------
+@app.post("/subjects/{subject_id}/sources")
+async def add_source(request: Request, subject_id: int):
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    title = (form.get("title") or "").strip()
+    url = (form.get("url") or "").strip()
+    content = (form.get("content") or "").strip()
+    upload = form.get("file")
+    with get_conn() as conn:
+        # Priority: an uploaded file, else a URL, else pasted text.
+        if upload is not None and getattr(upload, "filename", ""):
+            data = await upload.read()
+            if data:
+                sources.save_file(conn, subject_id, title, upload.filename, data)
+        elif url:
+            sources.create_url(conn, subject_id, title, url)
+        elif content:
+            sources.create_text(conn, subject_id, title, content)
+    return RedirectResponse(f"/subjects/{subject_id}", status_code=303)
+
+
+@app.post("/sources/{source_id}/delete")
+def delete_source(request: Request, source_id: int):
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        src = sources.get(conn, source_id)
+        sources.delete(conn, source_id)
+    dest = f"/subjects/{src['subject_id']}" if src and src["subject_id"] else "/"
+    return RedirectResponse(dest, status_code=303)
+
+
+@app.get("/sources/{source_id}")
+def view_source(request: Request, source_id: int):
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        src = sources.get(conn, source_id)
+    if not src:
+        return RedirectResponse("/", status_code=303)
+    if src["kind"] == "url":
+        return RedirectResponse(src["url"], status_code=303)
+    if src["kind"] == "file" and src["file_path"] and os.path.exists(src["file_path"]):
+        # Serve by the path stored in the DB (never a user-supplied path).
+        # Display inline (PDFs/text render in the browser tab) rather than forcing
+        # a download — the point is to eyeball the source while troubleshooting.
+        return FileResponse(src["file_path"], content_disposition_type="inline",
+                            filename=src["filename"] or "source")
+    # Pasted text, or a file whose bytes are gone — show whatever text we have.
+    return PlainTextResponse(src["content"] or "(no content)")
+
+
+# --------------------------------------------------------------------------
 # Manual question CRUD  (the LLM-free path — also the app's test path)
 # --------------------------------------------------------------------------
 @app.get("/chapters/{chapter_id}/questions/new", response_class=HTMLResponse)
@@ -202,7 +271,8 @@ def new_question(request: Request, chapter_id: int):
         return redirect
     with get_conn() as conn:
         chapter = conn.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
-    return render(request, "question_edit.html", chapter=dict(chapter), q=None)
+        source_list = sources.list_for_subject(conn, chapter["subject_id"])
+    return render(request, "question_edit.html", chapter=dict(chapter), q=None, sources=source_list)
 
 
 @app.get("/questions/{question_id}/edit", response_class=HTMLResponse)
@@ -215,9 +285,10 @@ def edit_question(request: Request, question_id: int):
         if not q:
             return RedirectResponse("/", status_code=303)
         chapter = conn.execute("SELECT * FROM chapters WHERE id = ?", (q["chapter_id"],)).fetchone()
+        source_list = sources.list_for_subject(conn, chapter["subject_id"])
     q = dict(q)
     q["choices"] = jloads(q["choices"])
-    return render(request, "question_edit.html", chapter=dict(chapter), q=q)
+    return render(request, "question_edit.html", chapter=dict(chapter), q=q, sources=source_list)
 
 
 def _parse_question_form(qtype, prompt, choices_text, answer, explanation):
@@ -233,28 +304,32 @@ def _parse_question_form(qtype, prompt, choices_text, answer, explanation):
 @app.post("/chapters/{chapter_id}/questions")
 def save_new_question(request: Request, chapter_id: int, type: str = Form(...),
                       prompt: str = Form(...), choices: str = Form(""),
-                      answer: str = Form(...), explanation: str = Form("")):
+                      answer: str = Form(...), explanation: str = Form(""),
+                      source_id: str = Form("")):
     _, redirect = require_admin(request)
     if redirect:
         return redirect
     p, ch, a, e = _parse_question_form(type, prompt, choices, answer, explanation)
+    sid = int(source_id) if source_id.isdigit() else None
     with get_conn() as conn:
-        conn.execute("""INSERT INTO questions (chapter_id, type, prompt, choices, answer, explanation)
-                        VALUES (?, ?, ?, ?, ?, ?)""", (chapter_id, type, p, ch, a, e))
+        conn.execute("""INSERT INTO questions (chapter_id, type, prompt, choices, answer, explanation, source_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)""", (chapter_id, type, p, ch, a, e, sid))
     return RedirectResponse(f"/chapters/{chapter_id}", status_code=303)
 
 
 @app.post("/questions/{question_id}")
 def update_question(request: Request, question_id: int, type: str = Form(...),
                     prompt: str = Form(...), choices: str = Form(""),
-                    answer: str = Form(...), explanation: str = Form("")):
+                    answer: str = Form(...), explanation: str = Form(""),
+                    source_id: str = Form("")):
     _, redirect = require_admin(request)
     if redirect:
         return redirect
     p, ch, a, e = _parse_question_form(type, prompt, choices, answer, explanation)
+    sid = int(source_id) if source_id.isdigit() else None
     with get_conn() as conn:
-        conn.execute("""UPDATE questions SET type=?, prompt=?, choices=?, answer=?, explanation=?
-                        WHERE id=?""", (type, p, ch, a, e, question_id))
+        conn.execute("""UPDATE questions SET type=?, prompt=?, choices=?, answer=?, explanation=?, source_id=?
+                        WHERE id=?""", (type, p, ch, a, e, sid, question_id))
         cid = conn.execute("SELECT chapter_id FROM questions WHERE id = ?", (question_id,)).fetchone()
     return RedirectResponse(f"/chapters/{cid['chapter_id']}", status_code=303)
 
@@ -280,22 +355,48 @@ def generate_form(request: Request, chapter_id: int):
         return redirect
     with get_conn() as conn:
         chapter = conn.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
+        source_list = sources.list_for_subject(conn, chapter["subject_id"])
     return render(request, "generate.html", chapter=dict(chapter),
-                  ai_base=ai.AI_BASE_URL, ai_model=ai.AI_MODEL)
+                  ai_base=ai.AI_BASE_URL, ai_model=ai.AI_MODEL, sources=source_list)
 
 
 @app.post("/chapters/{chapter_id}/generate", response_class=HTMLResponse)
-def generate_run(request: Request, chapter_id: int, mode: str = Form("topic"),
-                 topic: str = Form(""), source_text: str = Form(""),
-                 num_questions: int = Form(8), difficulty: str = Form("medium"),
-                 types: list[str] = Form(default=["mcq", "truefalse", "short"])):
+async def generate_run(request: Request, chapter_id: int):
     user, redirect = require_admin(request)
     if redirect:
         return redirect
-    result = ai.generate_questions(mode, topic, source_text, num_questions, difficulty, types)
+    form = await request.form()
+    mode = form.get("mode", "topic")
+    topic = form.get("topic", "")
+    num_questions = int(form.get("num_questions") or 8)
+    difficulty = form.get("difficulty", "medium")
+    types = form.getlist("types") or ["mcq", "truefalse", "short"]
+
+    # In source mode, resolve the source the questions are drawn from — an
+    # existing one, an inline upload, or pasted text — and save it so every
+    # generated question keeps a traceable link to its material.
+    source_id, source_text = None, ""
     with get_conn() as conn:
-        chapter = conn.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
-    return render(request, "review.html", chapter=dict(chapter), result=result)
+        chapter = dict(conn.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone())
+        if mode == "source":
+            existing = form.get("existing_source_id", "")
+            upload = form.get("source_file")
+            pasted = (form.get("source_text") or "").strip()
+            title = (form.get("source_title") or "").strip()
+            if existing.isdigit():
+                src = sources.get(conn, int(existing))
+                if src:
+                    source_id, source_text = src["id"], sources.text_for_generation(src)
+            elif upload is not None and getattr(upload, "filename", ""):
+                data = await upload.read()
+                source_id = sources.save_file(conn, chapter["subject_id"], title, upload.filename, data)
+                source_text = sources.text_for_generation(sources.get(conn, source_id))
+            elif pasted:
+                source_id = sources.create_text(conn, chapter["subject_id"], title, pasted)
+                source_text = pasted
+    # AI call is slow — do it outside the DB connection.
+    result = ai.generate_questions(mode, topic, source_text, num_questions, difficulty, types)
+    return render(request, "review.html", chapter=chapter, result=result, source_id=source_id)
 
 
 @app.post("/chapters/{chapter_id}/generate/save")
@@ -307,6 +408,8 @@ async def generate_save(request: Request, chapter_id: int):
         return redirect
     form = await request.form()
     n = int(form.get("count", 0))
+    sid_raw = form.get("source_id", "")
+    sid = int(sid_raw) if sid_raw.isdigit() else None
     saved = 0
     with get_conn() as conn:
         for i in range(n):
@@ -324,9 +427,9 @@ async def generate_save(request: Request, chapter_id: int):
             elif qtype == "short":
                 choices = []
             explanation = (form.get(f"explanation_{i}") or "").strip()
-            conn.execute("""INSERT INTO questions (chapter_id, type, prompt, choices, answer, explanation)
-                            VALUES (?, ?, ?, ?, ?, ?)""",
-                         (chapter_id, qtype, prompt, json.dumps(choices), answer, explanation))
+            conn.execute("""INSERT INTO questions (chapter_id, type, prompt, choices, answer, explanation, source_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                         (chapter_id, qtype, prompt, json.dumps(choices), answer, explanation, sid))
             saved += 1
     return RedirectResponse(f"/chapters/{chapter_id}?saved={saved}", status_code=303)
 
@@ -523,15 +626,23 @@ def _question_stats(conn):
         SELECT s.name AS subject, s.id AS subject_id,
                c.name AS chapter, c.id AS chapter_id, c.position AS cpos,
                q.id AS qid, q.prompt AS prompt, q.type AS type, q.answer AS answer,
+               q.source_id AS source_id, src.title AS source_title, src.kind AS source_kind,
+               src.filename AS source_filename, src.url AS source_url,
                COUNT(a.id) AS attempts,
                COALESCE(SUM(a.is_correct), 0) AS correct
         FROM questions q
         JOIN chapters c ON q.chapter_id = c.id
         JOIN subjects s ON c.subject_id = s.id
         LEFT JOIN answers a ON a.question_id = q.id
+        LEFT JOIN sources src ON q.source_id = src.id
         GROUP BY q.id
         ORDER BY s.name, c.position, c.id, q.id
     """)]
+    for r in rows:
+        r["source_label"] = sources.label(
+            {"kind": r["source_kind"], "title": r["source_title"],
+             "filename": r["source_filename"], "url": r["source_url"]}
+        ) if r["source_id"] else ""
     for r in rows:
         r["pct"] = round(100 * r["correct"] / r["attempts"]) if r["attempts"] else None
         # "Weak" = enough data to trust, and missed more often than not.

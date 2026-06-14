@@ -16,12 +16,13 @@ already uses each person's recall to decide what to show next — this page is f
   <p class="muted">Questions answered at least 3 times and correct less than 60% of the time.</p>
   {% if weak %}
   <table class="data">
-    <tr><th>Chapter</th><th>Question</th><th>Type</th><th>Correct</th></tr>
+    <tr><th>Chapter</th><th>Question</th><th>Type</th><th>Source</th><th>Correct</th></tr>
     {% for q in weak %}
     <tr>
       <td class="muted">{{ q.chapter }}</td>
       <td><a href="/questions/{{ q.qid }}/edit">{{ q.prompt }}</a></td>
       <td><span class="pill type-{{ q.type }}">{{ q.type }}</span></td>
+      <td>{% if q.source_id %}<a href="/sources/{{ q.source_id }}" target="_blank">{{ q.source_label }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
       <td><strong>{{ q.pct }}%</strong> <span class="muted">({{ q.correct }}/{{ q.attempts }})</span></td>
     </tr>
     {% endfor %}

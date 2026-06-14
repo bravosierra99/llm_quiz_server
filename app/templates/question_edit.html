@@ -32,6 +32,15 @@
     <textarea name="explanation" rows="2">{{ q.explanation if q else '' }}</textarea>
   </label>
 
+  <label>Source <span class="muted">(optional — where this question comes from)</span>
+    <select name="source_id">
+      <option value="">— none —</option>
+      {% for s in sources %}
+      <option value="{{ s.id }}" {{ 'selected' if q and q.source_id == s.id else '' }}>{{ s.title }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
   <div class="actions">
     <button type="submit" class="primary">{{ 'Save changes' if q else 'Add question' }}</button>
     <a class="btn" href="/chapters/{{ chapter.id }}">Cancel</a>

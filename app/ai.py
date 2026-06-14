@@ -226,9 +226,10 @@ def review_results(weak_rows):
                                     "Come back once there's more quiz history.", "error": ""}
     lines = []
     for r in weak_rows:
+        src = f' [source: {r["source_label"]}]' if r.get("source_label") else ""
         lines.append(
             f'- [{r["chapter"]}] {r["type"]} — {r["correct"]}/{r["attempts"]} correct '
-            f'({r["pct"]}%): "{r["prompt"]}" (answer key: "{r["answer"]}")'
+            f'({r["pct"]}%): "{r["prompt"]}" (answer key: "{r["answer"]}"){src}'
         )
     user_prompt = "These questions are missed most often:\n\n" + "\n".join(lines)
     messages = [

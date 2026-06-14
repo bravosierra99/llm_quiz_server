@@ -16,6 +16,7 @@
 <p>Uncheck any you don't want, edit anything that's off, then save.</p>
 <form method="post" action="/chapters/{{ chapter.id }}/generate/save">
   <input type="hidden" name="count" value="{{ result.questions|length }}">
+  {% if source_id %}<input type="hidden" name="source_id" value="{{ source_id }}">{% endif %}
   {% for q in result.questions %}
   <div class="card review-q">
     <div class="row-between">

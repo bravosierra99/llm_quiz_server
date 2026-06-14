@@ -13,10 +13,16 @@ one or several chapters at a time. Runs as a single Docker container.
 
 - **Library**: subjects → chapters → questions. Manual question CRUD plus AI generation.
 - **AI generation** (any OpenAI-compatible endpoint — LM Studio, Ollama, vLLM,
-  llama.cpp, OpenAI, …): from a **topic prompt** or from **pasted source
-  material**. Output is validated, malformed items are dropped, and everything
-  lands in a **review/edit step before saving** — so a flaky local model degrades
-  to "fewer questions," never garbage in a quiz.
+  llama.cpp, OpenAI, …): from a **topic prompt**, **pasted text**, or an
+  **uploaded document** (PDF / `.txt` / `.md` — text is extracted automatically).
+  Output is validated, malformed items are dropped, and everything lands in a
+  **review/edit step before saving** — so a flaky local model degrades to "fewer
+  questions," never garbage in a quiz.
+- **Reference material + provenance**: per-subject **sources** (uploaded files,
+  pasted passages, or URLs) are stored so every question can be **traced back to
+  where it came from**. Uploaded files persist on the data volume and stay
+  viewable; the source link shows up while curating (chapter view, analytics) so
+  you can check a struggling question against its material.
 - **Quiz loop**: pick one or multiple chapters, choose count + order. MCQ and
   True/False auto-grade; short-answer is **self-graded flashcard style** (type,
   reveal, "got it / missed it"). Results page + **retry the ones you missed**.
