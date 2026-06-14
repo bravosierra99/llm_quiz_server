@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}History · FleetQuiz{% endblock %}
+{% block body %}
+<h1>{{ user.name }}'s history</h1>
+{% if sessions %}
+<table class="data">
+  <tr><th>When</th><th>Topics</th><th>Score</th><th>%</th></tr>
+  {% for s in sessions %}
+  <tr>
+    <td class="muted">{{ s.finished_at }}</td>
+    <td>{{ s.label }}</td>
+    <td>{{ s.correct }}/{{ s.total }}</td>
+    <td>{{ (s.correct / s.total * 100)|round(0, 'floor') if s.total else 0 }}%</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">No finished quizzes yet. <a href="/quiz">Take one →</a></p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Review generated questions{% endblock %}
+{% block body %}
+<h1>Review generated questions</h1>
+<p class="muted">Chapter: {{ chapter.name }}</p>
+
+{% if result.error %}
+<p class="flash error">{{ result.error }}</p>
+{% endif %}
+{% if result.dropped %}
+<p class="muted small">Skipped {{ result.dropped|length }} malformed item(s) from the model:
+   {{ result.dropped|join('; ') }}</p>
+{% endif %}
+
+{% if result.questions %}
+<p>Uncheck any you don't want, edit anything that's off, then save.</p>
+<form method="post" action="/chapters/{{ chapter.id }}/generate/save">
+  <input type="hidden" name="count" value="{{ result.questions|length }}">
+  {% for q in result.questions %}
+  <div class="card review-q">
+    <div class="row-between">
+      <label class="check"><input type="checkbox" name="keep_{{ loop.index0 }}" checked> Keep</label>
+      <select name="type_{{ loop.index0 }}">
+        {% for t in ['mcq','truefalse','short'] %}
+        <option value="{{ t }}" {{ 'selected' if q.type == t else '' }}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <label>Question
+      <textarea name="prompt_{{ loop.index0 }}" rows="2">{{ q.prompt }}</textarea>
+    </label>
+    <label>Choices <span class="muted">(one per line, MCQ)</span>
+      <textarea name="choices_{{ loop.index0 }}" rows="3">{{ q.choices|join('\n') }}</textarea>
+    </label>
+    <label>Answer
+      <input name="answer_{{ loop.index0 }}" value="{{ q.answer }}">
+    </label>
+    <label>Explanation
+      <textarea name="explanation_{{ loop.index0 }}" rows="2">{{ q.explanation }}</textarea>
+    </label>
+  </div>
+  {% endfor %}
+  <div class="actions">
+    <button type="submit" class="primary">Save kept questions</button>
+    <a class="btn" href="/chapters/{{ chapter.id }}/generate">Discard & try again</a>
+  </div>
+</form>
+{% else %}
+<a class="btn primary" href="/chapters/{{ chapter.id }}/generate">← Try again</a>
+{% endif %}
+{% endblock %}

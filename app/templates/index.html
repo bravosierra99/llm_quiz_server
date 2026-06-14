@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="row-between">
+  <h1>Library</h1>
+  <a href="/quiz" class="btn primary">Take a quiz →</a>
+</div>
+
+{% if subjects %}
+<div class="cards">
+  {% for s in subjects %}
+  <a class="card link-card" href="/subjects/{{ s.id }}">
+    <h3>{{ s.name }}</h3>
+    {% if s.description %}<p class="muted">{{ s.description }}</p>{% endif %}
+    <p class="meta">{{ s.chapter_count }} chapter{{ '' if s.chapter_count == 1 else 's' }}
+       · {{ s.question_count }} question{{ '' if s.question_count == 1 else 's' }}</p>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted">No subjects yet. Create one below to get started.</p>
+{% endif %}
+
+<div class="card">
+  <h3>New subject</h3>
+  <form method="post" action="/subjects" class="stack">
+    <label>Name <input name="name" required placeholder="e.g. Arduino Experiments"></label>
+    <label>Description <input name="description" placeholder="optional"></label>
+    <button type="submit" class="primary">Add subject</button>
+  </form>
+</div>
+
+{% if recent %}
+<h2>Your recent quizzes</h2>
+<table class="data">
+  <tr><th>When</th><th>Topics</th><th>Score</th></tr>
+  {% for r in recent %}
+  <tr>
+    <td class="muted">{{ r.finished_at }}</td>
+    <td>{{ r.label }}</td>
+    <td>{{ r.correct }}/{{ r.total }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

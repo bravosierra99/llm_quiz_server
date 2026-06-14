@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Quiz · {{ idx + 1 }}/{{ total }}{% endblock %}
+{% block body %}
+<div class="progress"><div class="bar" style="width: {{ (idx / total * 100)|round(0, 'floor') }}%"></div></div>
+<p class="muted">Question {{ idx + 1 }} of {{ total }} · {{ session.label }}</p>
+
+<div class="card quiz-card">
+  <span class="pill type-{{ q.type }}">{{ q.type }}</span>
+  <h2 class="prompt">{{ q.prompt }}</h2>
+
+  {% if q.type in ['mcq', 'truefalse'] %}
+  <form method="post" action="/quiz/{{ session.id }}/q/{{ idx }}" class="stack">
+    <div class="choice-list">
+      {% for c in q.choices %}
+      <label class="choice-option">
+        <input type="radio" name="answer" value="{{ c }}" required> <span>{{ c }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    <button type="submit" class="primary">Submit</button>
+  </form>
+
+  {% else %}
+  {# Short answer: self-graded flashcard. Type your answer, reveal, then grade. #}
+  <form method="post" action="/quiz/{{ session.id }}/q/{{ idx }}" class="stack" id="short-form">
+    <label>Your answer
+      <textarea name="answer" rows="2" placeholder="Type your answer, then reveal"></textarea>
+    </label>
+    <input type="hidden" name="self_correct" id="self_correct" value="">
+    <button type="button" class="btn" id="reveal-btn" onclick="reveal()">Reveal answer</button>
+
+    <div id="reveal-box" style="display:none">
+      <p class="answer"><strong>Correct answer:</strong> {{ q.answer }}</p>
+      {% if q.explanation %}<p class="muted">{{ q.explanation }}</p>{% endif %}
+      <p>Did you get it right?</p>
+      <div class="actions">
+        <button type="submit" class="primary" onclick="setSelf('yes')">✓ Got it</button>
+        <button type="submit" class="btn danger" onclick="setSelf('no')">✗ Missed it</button>
+      </div>
+    </div>
+  </form>
+  <script>
+    function reveal() {
+      document.getElementById('reveal-box').style.display = 'block';
+      document.getElementById('reveal-btn').style.display = 'none';
+    }
+    function setSelf(v) { document.getElementById('self_correct').value = v; }
+  </script>
+  {% endif %}
+</div>
+{% endblock %}

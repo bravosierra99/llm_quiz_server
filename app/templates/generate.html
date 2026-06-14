@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}AI generate · {{ chapter.name }}{% endblock %}
+{% block body %}
+<h1>✨ Generate questions</h1>
+<p class="muted">Chapter: {{ chapter.name }}</p>
+<p class="muted small">Using <code>{{ ai_model }}</code> at <code>{{ ai_base }}</code>.
+   Generated questions go to a review step before they're saved.</p>
+
+<form method="post" action="/chapters/{{ chapter.id }}/generate" class="stack card">
+  <div class="tabs">
+    <label class="radio"><input type="radio" name="mode" value="topic" checked onchange="syncMode()"> From a topic / prompt</label>
+    <label class="radio"><input type="radio" name="mode" value="source" onchange="syncMode()"> From source material</label>
+  </div>
+
+  <label id="topic-field">Topic / prompt
+    <textarea name="topic" rows="3"
+      placeholder="e.g. Key things a 10-year-old should learn from Arduino experiments 1-3: LEDs, resistors, digitalWrite, breadboards"></textarea>
+  </label>
+
+  <label id="source-field" style="display:none">Source material
+    <textarea name="source_text" rows="10"
+      placeholder="Paste the chapter text, lab instructions, notes, etc. Questions will be drawn only from this."></textarea>
+  </label>
+
+  <div class="grid-3">
+    <label>How many
+      <input type="number" name="num_questions" value="8" min="1" max="30">
+    </label>
+    <label>Difficulty
+      <select name="difficulty">
+        <option value="easy">easy</option>
+        <option value="medium" selected>medium</option>
+        <option value="hard">hard</option>
+      </select>
+    </label>
+  </div>
+
+  <fieldset class="types">
+    <legend>Question types</legend>
+    <label class="check"><input type="checkbox" name="types" value="mcq" checked> Multiple choice</label>
+    <label class="check"><input type="checkbox" name="types" value="truefalse" checked> True / False</label>
+    <label class="check"><input type="checkbox" name="types" value="short" checked> Short answer</label>
+  </fieldset>
+
+  <button type="submit" class="primary">Generate →</button>
+  <p class="muted small">This calls the local AI model and can take 10–60s.</p>
+</form>
+
+<script>
+function syncMode() {
+  const source = document.querySelector('input[name=mode][value=source]').checked;
+  document.getElementById('source-field').style.display = source ? '' : 'none';
+  document.getElementById('topic-field').style.display = source ? 'none' : '';
+}
+syncMode();
+</script>
+{% endblock %}

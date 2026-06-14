@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Results · FleetQuiz{% endblock %}
+{% block body %}
+{% set pct = (correct / total * 100)|round(0, 'floor') if total else 0 %}
+<h1>Results</h1>
+<div class="score-banner {{ 'good' if pct >= 80 else ('ok' if pct >= 50 else 'low') }}">
+  <span class="big">{{ correct }}/{{ total }}</span>
+  <span>{{ pct }}%</span>
+  <span class="muted">{{ session.label }}</span>
+</div>
+
+{% if missed_ids %}
+<form method="post" action="/quiz/retry-missed">
+  <input type="hidden" name="question_ids" value="{{ missed_ids|join(',') }}">
+  <input type="hidden" name="label" value="{{ session.label }}">
+  <button type="submit" class="btn primary">↻ Retry the {{ missed_ids|length }} you missed</button>
+</form>
+{% else %}
+<p class="flash">Perfect score! 🎉</p>
+{% endif %}
+
+<h2>Review</h2>
+{% for r in rows %}
+<div class="card result-row {{ 'correct-row' if r.is_correct else 'wrong-row' }}">
+  <div class="row-between">
+    <span class="pill type-{{ r.type }}">{{ r.type }}</span>
+    <span>{{ '✓' if r.is_correct else '✗' }}</span>
+  </div>
+  <p class="prompt">{{ r.prompt }}</p>
+  {% if not r.is_correct %}
+    {% if r.user_answer %}<p class="muted">You answered: {{ r.user_answer }}</p>{% endif %}
+    <p class="answer"><strong>Correct:</strong> {{ r.answer }}</p>
+  {% else %}
+    <p class="answer"><strong>Answer:</strong> {{ r.answer }}</p>
+  {% endif %}
+  {% if r.explanation %}<p class="muted explanation">{{ r.explanation }}</p>{% endif %}
+</div>
+{% endfor %}
+
+<div class="actions">
+  <a class="btn primary" href="/quiz">Another quiz</a>
+  <a class="btn" href="/">Library</a>
+</div>
+{% endblock %}

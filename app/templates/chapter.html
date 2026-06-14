@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ chapter.name }} · FleetQuiz{% endblock %}
+{% block body %}
+<p class="muted"><a href="/">Library</a> / <a href="/subjects/{{ chapter.subject_id }}">{{ chapter.subject_name }}</a> / {{ chapter.name }}</p>
+<div class="row-between">
+  <h1>{{ chapter.name }}</h1>
+  <div class="actions">
+    <a class="btn primary" href="/chapters/{{ chapter.id }}/generate">✨ AI generate</a>
+    <a class="btn" href="/chapters/{{ chapter.id }}/questions/new">+ Add question</a>
+  </div>
+</div>
+
+{% if request.query_params.get('saved') %}
+<p class="flash">Saved {{ request.query_params.get('saved') }} question(s).</p>
+{% endif %}
+
+{% if questions %}
+<ol class="qlist">
+  {% for q in questions %}
+  <li class="card">
+    <div class="row-between">
+      <span class="pill type-{{ q.type }}">{{ q.type }}</span>
+      <div class="actions">
+        <a class="btn small" href="/questions/{{ q.id }}/edit">Edit</a>
+        <form method="post" action="/questions/{{ q.id }}/delete"
+              onsubmit="return confirm('Delete this question?')">
+          <button class="btn small danger">Delete</button>
+        </form>
+      </div>
+    </div>
+    <p class="prompt">{{ q.prompt }}</p>
+    {% if q.choices %}
+    <ul class="choices">
+      {% for c in q.choices %}
+      <li class="{{ 'correct' if c == q.answer else '' }}">{{ c }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="answer"><strong>Answer:</strong> {{ q.answer }}</p>
+    {% endif %}
+    {% if q.explanation %}<p class="muted explanation">{{ q.explanation }}</p>{% endif %}
+  </li>
+  {% endfor %}
+</ol>
+{% else %}
+<p class="muted">No questions yet. Generate some with AI, or add one manually.</p>
+{% endif %}
+
+<form method="post" action="/chapters/{{ chapter.id }}/delete"
+      onsubmit="return confirm('Delete this chapter and all its questions?')">
+  <button class="btn danger">Delete chapter</button>
+</form>
+{% endblock %}

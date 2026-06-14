@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Take a quiz · FleetQuiz{% endblock %}
+{% block body %}
+<h1>Take a quiz</h1>
+{% if chapters %}
+<form method="post" action="/quiz/start" class="stack card">
+  <p>Pick one or more chapters to quiz on:</p>
+  {% set current_subject = namespace(name=None) %}
+  {% for c in chapters %}
+    {% if c.subject_name != current_subject.name %}
+      {% set current_subject.name = c.subject_name %}
+      <h3 class="subject-head">{{ c.subject_name }}</h3>
+    {% endif %}
+    <label class="check chapter-pick {{ 'disabled' if c.question_count == 0 else '' }}">
+      <input type="checkbox" name="chapter_ids" value="{{ c.id }}"
+             {{ 'disabled' if c.question_count == 0 else '' }}>
+      {{ c.name }} <span class="muted">({{ c.question_count }} Q)</span>
+    </label>
+  {% endfor %}
+
+  <div class="grid-3">
+    <label>Number of questions
+      <input type="number" name="num_questions" value="10" min="1" max="100">
+    </label>
+    <label>Order
+      <select name="order">
+        <option value="shuffle">Shuffle</option>
+        <option value="ordered">In order</option>
+      </select>
+    </label>
+  </div>
+  <button type="submit" class="primary">Start quiz →</button>
+</form>
+{% else %}
+<p class="muted">No questions exist yet. <a href="/">Add some content first.</a></p>
+{% endif %}
+{% endblock %}

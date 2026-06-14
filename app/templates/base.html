@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}FleetQuiz{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">🧠 FleetQuiz</a>
+  <nav>
+    <a href="/">Library</a>
+    <a href="/quiz">Take a quiz</a>
+    <a href="/history">History</a>
+  </nav>
+  <div class="who">
+    {% if user %}
+      <span class="pill">{{ user.name }}{% if user.is_admin %} ⭐{% endif %}</span>
+      <a href="/logout" class="muted">switch</a>
+    {% else %}
+      <a href="/who">Sign in</a>
+    {% endif %}
+  </div>
+</header>
+<main>
+  {% block body %}{% endblock %}
+</main>
+<footer class="muted">FleetQuiz · family study · self-hosted</footer>
+</body>
+</html>
