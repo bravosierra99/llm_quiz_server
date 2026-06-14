@@ -93,14 +93,49 @@ sensitive):**
 If you want a hard admin boundary, run the app only behind an authenticating
 reverse proxy (Cloudflare Access or equivalent) and don't expose the bare port.
 
-## Deployment notes
+## Deployment
 
-- The app listens on **8080** inside the container; map it to whatever host port
-  you like.
-- The DB is a single `quiz.db` file on the `/data` volume — trivial to back up.
-  Bind-mount `/data` to a backed-up path if you want it in your backups.
-- To use roles meaningfully, front the app with an authenticating reverse proxy
-  and set `ADMIN_EMAILS` to the admins' email addresses.
+The app is one container; how you expose it is up to you. A few patterns, in
+rough order of how much you're exposing:
+
+**LAN only.** Run `docker compose up -d` and hit `http://<host>:8080` from your
+network. Profiles have no passwords, so treat everyone on the LAN as trusted.
+Fine for a single household, no SSO needed.
+
+**Behind a reverse proxy (TLS + a nice hostname).** Put something like
+[Nginx Proxy Manager](https://nginxproxymanager.com/), [Traefik](https://traefik.io/),
+or [Caddy](https://caddyserver.com/) in front, terminate TLS, and route
+`quiz.example.com` → the container's port 8080. Still no real auth — anyone who
+can reach the hostname can pick any profile.
+
+**Behind an authenticating proxy (recommended if it's reachable off-LAN).**
+Add an SSO/identity layer that injects the authenticated user's email as the
+`Cf-Access-Authenticated-User-Email` request header. The app trusts that header
+to identify the user and grants admin iff the email is in `ADMIN_EMAILS`. Options:
+
+- **[Cloudflare Tunnel + Access](https://developers.cloudflare.com/cloudflare-one/applications/)**
+  — Access sets that exact header for you; define a policy per group
+  (e.g. admins vs. everyone else).
+- **[Authelia](https://www.authelia.com/) / [authentik](https://goauthentik.io/) /
+  [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/)** — configure the
+  proxy to forward the verified email under that header name.
+
+> ⚠️ The header is **only trustworthy if the container is unreachable except
+> through the proxy.** Anything that can hit `:8080` directly can forge it. Don't
+> publish the bare port. See [Authentication & security model](#authentication--security-model).
+
+**Storage / backups.** The entire state is one `quiz.db` file on the `/data`
+volume. Bind-mount `/data` to a path that's in your backup rotation (NAS, a
+backed-up host directory, etc.) and you're covered — copy the file to restore.
+
+**AI endpoint.** Point `AI_BASE_URL` at any OpenAI-compatible server. For a
+local model server (LM Studio, Ollama, vLLM, llama.cpp) running on the Docker
+host, use `http://host.docker.internal:1234/v1`; for one elsewhere on the LAN,
+use its address. Set `AI_MODEL` to the exact id the server advertises, and bump
+`AI_TIMEOUT` if your model is slow (local models often need 1–2 min/batch).
+
+> Keeping your own deployment notes? Drop them in a `*.local.md` file — those are
+> gitignored so your hostnames, IPs, and policy details stay out of git.
 
 ## License
 
