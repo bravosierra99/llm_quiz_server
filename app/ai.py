@@ -201,3 +201,42 @@ def generate_questions(mode, topic, source_text, num_questions, difficulty, type
         "dropped": dropped,
         "error": "" if questions else "No usable questions were produced. Try again or adjust the prompt.",
     }
+
+
+REVIEW_SYSTEM_PROMPT = """You are helping an admin improve a family study-quiz. \
+You are shown the questions that learners get wrong most often, with how many \
+attempts and how many were correct. For each, judge the most likely cause:
+  - ambiguous or confusingly worded prompt
+  - the answer key looks wrong or incomplete
+  - genuinely hard but fair (leave it)
+  - a knowledge gap that needs an easier foundational question first
+
+Be concise and concrete. Use short bullets grouped by chapter. Suggest a fix \
+only when you actually suspect a problem with the question — do not rewrite fair \
+questions. Plain text, no markdown headers."""
+
+
+def review_results(weak_rows):
+    """Qualitative LLM review of the struggle questions. `weak_rows` is the list
+    of per-question stat dicts (prompt/type/answer/attempts/correct/pct/chapter).
+    Returns {ok, text, error}. Never raises — connection errors surface in
+    `error` so the route can show a friendly message."""
+    if not weak_rows:
+        return {"ok": True, "text": "No questions have enough wrong answers yet to review. "
+                                    "Come back once there's more quiz history.", "error": ""}
+    lines = []
+    for r in weak_rows:
+        lines.append(
+            f'- [{r["chapter"]}] {r["type"]} — {r["correct"]}/{r["attempts"]} correct '
+            f'({r["pct"]}%): "{r["prompt"]}" (answer key: "{r["answer"]}")'
+        )
+    user_prompt = "These questions are missed most often:\n\n" + "\n".join(lines)
+    messages = [
+        {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+    try:
+        text = _chat(messages)
+    except (httpx.HTTPError, KeyError, IndexError) as e:
+        return {"ok": False, "text": "", "error": f"AI request failed: {e}"}
+    return {"ok": True, "text": (text or "").strip(), "error": ""}

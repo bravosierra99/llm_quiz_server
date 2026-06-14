@@ -20,6 +20,9 @@
       <h3><a href="/chapters/{{ c.id }}">{{ c.name }}</a></h3>
       <span class="pill">{{ c.question_count }} Q</span>
     </div>
+    {% if c.progress and c.progress.status not in ('empty',) %}
+      <span class="badge mastery-{{ c.progress.status }}">{{ c.progress.label }}</span>
+    {% endif %}
     <div class="actions">
       <a class="btn" href="/chapters/{{ c.id }}">Manage</a>
       <a class="btn" href="/chapters/{{ c.id }}/generate">✨ AI generate</a>

@@ -13,6 +13,7 @@
     <a href="/">Library</a>
     <a href="/quiz">Take a quiz</a>
     <a href="/history">History</a>
+    {% if user and user.is_admin %}<a href="/analytics">Analytics</a>{% endif %}
   </nav>
   <div class="who">
     {% if user %}

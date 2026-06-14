@@ -20,6 +20,20 @@ one or several chapters at a time. Runs as a single Docker container.
 - **Quiz loop**: pick one or multiple chapters, choose count + order. MCQ and
   True/False auto-grade; short-answer is **self-graded flashcard style** (type,
   reveal, "got it / missed it"). Results page + **retry the ones you missed**.
+- **Adaptive scheduling (spaced repetition)**: within the chapters you pick,
+  question selection is **smart by default** — it uses a per-person, per-question
+  **SM-2-lite** scheduler (the spaced-repetition math behind Anki) to show what
+  you're **due** to review first, introduce new questions at a measured pace, and
+  push back questions you've reliably recalled. Each chapter shows a **mastery
+  badge** (Not started / N due / N learned / Mastered). `Shuffle` and `In order`
+  remain as non-adaptive escape hatches. No LLM in this loop — it's deterministic
+  and instant.
+- **Admin analytics + optional AI review**: an admin-only **Analytics** page
+  reports per-question and per-chapter performance and flags "struggle" questions
+  (answered ≥3 times, <60% correct). One button kicks off an **optional** LLM pass
+  that suggests *why* a question is missed (ambiguous wording, wrong answer key,
+  needs a foundational question) — curation advice only; nothing changes
+  automatically.
 - **Family profiles + roles**: lightweight per-person profiles with quiz history.
   **Admins** can add/edit/generate/delete content; **non-admin profiles are
   quiz-only** (every mutation + generation route is gated by `require_admin`).

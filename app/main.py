@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import ai, auth
+from . import ai, auth, scheduler
 from .db import get_conn, init_db, jloads
 
 BASE_DIR = os.path.dirname(__file__)
@@ -136,6 +136,8 @@ def view_subject(request: Request, subject_id: int):
             SELECT c.*, (SELECT COUNT(*) FROM questions q WHERE q.chapter_id = c.id) AS question_count
             FROM chapters c WHERE c.subject_id = ? ORDER BY c.position, c.id
         """, (subject_id,))]
+        for c in chapters:
+            c["progress"] = scheduler.chapter_progress(conn, user["id"], c["id"])
     return render(request, "subject.html", subject=dict(subject), chapters=chapters)
 
 
@@ -345,25 +347,24 @@ def quiz_setup(request: Request):
             FROM chapters c JOIN subjects s ON c.subject_id = s.id
             ORDER BY s.name, c.position, c.id
         """)]
+        for c in chapters:
+            # Surface the mastery recommendation right where chapters are picked.
+            c["progress"] = scheduler.chapter_progress(conn, user["id"], c["id"])
     return render(request, "quiz_setup.html", subjects=subjects, chapters=chapters)
 
 
 @app.post("/quiz/start")
 def quiz_start(request: Request, chapter_ids: list[int] = Form(default=[]),
-               num_questions: int = Form(10), order: str = Form("shuffle")):
+               num_questions: int = Form(10), order: str = Form("adaptive")):
     user, redirect = require_user(request)
     if redirect:
         return redirect
     if not chapter_ids:
         return RedirectResponse("/quiz", status_code=303)
     placeholders = ",".join("?" for _ in chapter_ids)
-    order_sql = "ORDER BY RANDOM()" if order == "shuffle" else "ORDER BY chapter_id, id"
     with get_conn() as conn:
-        rows = conn.execute(
-            f"SELECT id FROM questions WHERE chapter_id IN ({placeholders}) {order_sql} LIMIT ?",
-            (*chapter_ids, num_questions),
-        ).fetchall()
-        qids = [r["id"] for r in rows]
+        # Adaptive (default) selection: due > new > not-yet-due. See scheduler.
+        qids = scheduler.select_question_ids(conn, user["id"], chapter_ids, num_questions, order)
         if not qids:
             return RedirectResponse("/quiz", status_code=303)
         names = conn.execute(
@@ -374,19 +375,19 @@ def quiz_start(request: Request, chapter_ids: list[int] = Form(default=[]),
             (user["id"], json.dumps(chapter_ids), label, len(qids)),
         )
         session_id = cur.lastrowid
-    # Stash the ordered question id list in a cookie-free way: re-query by session.
-    # We persist order by writing placeholder answer rows now (empty), in order.
-    with get_conn() as conn:
-        for qid in qids:
+        # The queue lives in session_questions — NOT in answers — so an abandoned
+        # session contributes nothing to analytics or recall state.
+        for pos, qid in enumerate(qids):
             conn.execute(
-                "INSERT INTO answers (session_id, question_id, user_answer, is_correct) VALUES (?, ?, '', 0)",
-                (session_id, qid))
+                "INSERT INTO session_questions (session_id, position, question_id) VALUES (?, ?, ?)",
+                (session_id, pos, qid))
     return RedirectResponse(f"/quiz/{session_id}/q/0", status_code=303)
 
 
 def _session_question_ids(conn, session_id):
     return [r["question_id"] for r in conn.execute(
-        "SELECT question_id FROM answers WHERE session_id = ? ORDER BY id", (session_id,))]
+        "SELECT question_id FROM session_questions WHERE session_id = ? ORDER BY position",
+        (session_id,))]
 
 
 @app.get("/quiz/{session_id}/q/{idx}", response_class=HTMLResponse)
@@ -413,6 +414,9 @@ def quiz_answer(request: Request, session_id: int, idx: int,
     if redirect:
         return redirect
     with get_conn() as conn:
+        session = conn.execute("SELECT * FROM quiz_sessions WHERE id = ?", (session_id,)).fetchone()
+        if not session:
+            return RedirectResponse("/quiz", status_code=303)
         qids = _session_question_ids(conn, session_id)
         if idx >= len(qids):
             return RedirectResponse(f"/quiz/{session_id}/results", status_code=303)
@@ -424,10 +428,25 @@ def quiz_answer(request: Request, session_id: int, idx: int,
         else:
             is_correct = 1 if answer.strip() == q["answer"].strip() else 0
             user_answer = answer.strip()
-        conn.execute(
-            "UPDATE answers SET user_answer = ?, is_correct = ?, answered_at = datetime('now') "
-            "WHERE session_id = ? AND question_id = ?",
-            (user_answer, is_correct, session_id, q["id"]))
+
+        existing = conn.execute(
+            "SELECT id FROM answers WHERE session_id = ? AND question_id = ?",
+            (session_id, q["id"])).fetchone()
+        if existing:
+            # Resubmit (e.g. browser back). Record the latest answer but DON'T
+            # re-grade — first retrieval is the real signal and re-grading would
+            # double-count reps/lapses.
+            conn.execute(
+                "UPDATE answers SET user_answer = ?, is_correct = ?, answered_at = datetime('now') "
+                "WHERE id = ?",
+                (user_answer, is_correct, existing["id"]))
+        else:
+            conn.execute(
+                "INSERT INTO answers (session_id, question_id, user_answer, is_correct) VALUES (?, ?, ?, ?)",
+                (session_id, q["id"], user_answer, is_correct))
+            # Grade the SESSION OWNER (profiles are switchable on the bare LAN),
+            # once, on this first attempt.
+            scheduler.grade(conn, session["user_id"], q["id"], bool(is_correct))
     return RedirectResponse(f"/quiz/{session_id}/q/{idx + 1}", status_code=303)
 
 
@@ -441,16 +460,20 @@ def quiz_results(request: Request, session_id: int):
         if not session:
             return RedirectResponse("/quiz", status_code=303)
         rows = [dict(r) for r in conn.execute("""
-            SELECT a.*, q.prompt, q.type, q.answer, q.explanation, q.choices
-            FROM answers a JOIN questions q ON a.question_id = q.id
-            WHERE a.session_id = ? ORDER BY a.id
+            SELECT sq.question_id AS question_id, q.prompt, q.type, q.answer, q.explanation, q.choices,
+                   a.user_answer AS user_answer, a.is_correct AS is_correct,
+                   (a.id IS NOT NULL) AS answered
+            FROM session_questions sq
+            JOIN questions q ON sq.question_id = q.id
+            LEFT JOIN answers a ON a.session_id = sq.session_id AND a.question_id = sq.question_id
+            WHERE sq.session_id = ? ORDER BY sq.position
         """, (session_id,))]
-        correct = sum(r["is_correct"] for r in rows)
+        correct = sum(1 for r in rows if r["is_correct"])
         conn.execute("UPDATE quiz_sessions SET correct = ?, finished_at = datetime('now') WHERE id = ?",
                      (correct, session_id))
     for r in rows:
         r["choices"] = jloads(r["choices"])
-    missed_ids = [r["question_id"] for r in rows if not r["is_correct"]]
+    missed_ids = [r["question_id"] for r in rows if r["answered"] and not r["is_correct"]]
     return render(request, "results.html", session=dict(session), rows=rows,
                   correct=correct, total=len(rows), missed_ids=missed_ids)
 
@@ -468,10 +491,10 @@ def quiz_retry_missed(request: Request, question_ids: str = Form(...), label: st
             "INSERT INTO quiz_sessions (user_id, chapter_ids, label, total) VALUES (?, '[]', ?, ?)",
             (user["id"], f"{label} (missed)", len(qids)))
         session_id = cur.lastrowid
-        for qid in qids:
+        for pos, qid in enumerate(qids):
             conn.execute(
-                "INSERT INTO answers (session_id, question_id, user_answer, is_correct) VALUES (?, ?, '', 0)",
-                (session_id, qid))
+                "INSERT INTO session_questions (session_id, position, question_id) VALUES (?, ?, ?)",
+                (session_id, pos, qid))
     return RedirectResponse(f"/quiz/{session_id}/q/0", status_code=303)
 
 
@@ -486,6 +509,70 @@ def history(request: Request):
             ORDER BY finished_at DESC LIMIT 50
         """, (user["id"],))]
     return render(request, "history.html", sessions=sessions)
+
+
+# --------------------------------------------------------------------------
+# Admin analytics  (Phase 3)  +  optional AI review  (Phase 4)
+# --------------------------------------------------------------------------
+def _question_stats(conn):
+    """Per-question performance across all users, grouped by subject/chapter.
+    Every row in `answers` is a real attempt now, so no placeholder filtering is
+    needed. Returns (subjects, weak) where subjects is a nested structure for
+    rendering and weak is the flat list of struggle questions."""
+    rows = [dict(r) for r in conn.execute("""
+        SELECT s.name AS subject, s.id AS subject_id,
+               c.name AS chapter, c.id AS chapter_id, c.position AS cpos,
+               q.id AS qid, q.prompt AS prompt, q.type AS type, q.answer AS answer,
+               COUNT(a.id) AS attempts,
+               COALESCE(SUM(a.is_correct), 0) AS correct
+        FROM questions q
+        JOIN chapters c ON q.chapter_id = c.id
+        JOIN subjects s ON c.subject_id = s.id
+        LEFT JOIN answers a ON a.question_id = q.id
+        GROUP BY q.id
+        ORDER BY s.name, c.position, c.id, q.id
+    """)]
+    for r in rows:
+        r["pct"] = round(100 * r["correct"] / r["attempts"]) if r["attempts"] else None
+        # "Weak" = enough data to trust, and missed more often than not.
+        r["weak"] = r["attempts"] >= 3 and r["pct"] is not None and r["pct"] < 60
+
+    subjects = []
+    for r in rows:
+        if not subjects or subjects[-1]["id"] != r["subject_id"]:
+            subjects.append({"id": r["subject_id"], "name": r["subject"], "chapters": []})
+        chapters = subjects[-1]["chapters"]
+        if not chapters or chapters[-1]["id"] != r["chapter_id"]:
+            chapters.append({"id": r["chapter_id"], "name": r["chapter"], "questions": []})
+        chapters[-1]["questions"].append(r)
+
+    weak = sorted((r for r in rows if r["weak"]), key=lambda r: r["pct"])
+    return subjects, weak
+
+
+@app.get("/analytics", response_class=HTMLResponse)
+def analytics(request: Request):
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        subjects, weak = _question_stats(conn)
+    return render(request, "analytics.html", subjects=subjects, weak=weak, ai_review=None)
+
+
+@app.post("/analytics/ai-review", response_class=HTMLResponse)
+def analytics_ai_review(request: Request):
+    """Admin-triggered LLM pass over the struggle questions. The scheduler
+    (deterministic SM-2) decides what to show; this is a SEPARATE, optional tool
+    that gives qualitative curation advice ('this prompt is ambiguous', 'the
+    answer key looks wrong'). Nothing is changed automatically."""
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        subjects, weak = _question_stats(conn)
+    ai_review = ai.review_results(weak)
+    return render(request, "analytics.html", subjects=subjects, weak=weak, ai_review=ai_review)
 
 
 @app.get("/healthz")

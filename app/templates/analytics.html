@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Analytics · FleetQuiz{% endblock %}
+{% block body %}
+<h1>Analytics</h1>
+<p class="muted">Performance across everyone's quizzes. The adaptive scheduler
+already uses each person's recall to decide what to show next — this page is for
+<em>you</em>, to curate the question bank.</p>
+
+<div class="card">
+  <div class="row-between">
+    <h2>Struggle questions</h2>
+    <form method="post" action="/analytics/ai-review">
+      <button type="submit" class="btn">✨ AI review these</button>
+    </form>
+  </div>
+  <p class="muted">Questions answered at least 3 times and correct less than 60% of the time.</p>
+  {% if weak %}
+  <table class="data">
+    <tr><th>Chapter</th><th>Question</th><th>Type</th><th>Correct</th></tr>
+    {% for q in weak %}
+    <tr>
+      <td class="muted">{{ q.chapter }}</td>
+      <td><a href="/questions/{{ q.qid }}/edit">{{ q.prompt }}</a></td>
+      <td><span class="pill type-{{ q.type }}">{{ q.type }}</span></td>
+      <td><strong>{{ q.pct }}%</strong> <span class="muted">({{ q.correct }}/{{ q.attempts }})</span></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Nothing flagged yet — either the bank is healthy or there isn't enough quiz history.</p>
+  {% endif %}
+</div>
+
+{% if ai_review %}
+<div class="card">
+  <h2>AI review</h2>
+  {% if ai_review.ok %}
+    <pre class="ai-review">{{ ai_review.text }}</pre>
+  {% else %}
+    <p class="flash error">{{ ai_review.error }}</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<h2>All questions by chapter</h2>
+{% for s in subjects %}
+<h3 class="subject-head">{{ s.name }}</h3>
+{% for c in s.chapters %}
+<div class="card">
+  <h4><a href="/chapters/{{ c.id }}">{{ c.name }}</a></h4>
+  <table class="data">
+    <tr><th>Question</th><th>Type</th><th>Attempts</th><th>Correct</th></tr>
+    {% for q in c.questions %}
+    <tr class="{{ 'wrong-row' if q.weak else '' }}">
+      <td><a href="/questions/{{ q.qid }}/edit">{{ q.prompt }}</a></td>
+      <td><span class="pill type-{{ q.type }}">{{ q.type }}</span></td>
+      <td>{{ q.attempts }}</td>
+      <td>{% if q.pct is not none %}{{ q.pct }}% <span class="muted">({{ q.correct }}/{{ q.attempts }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endfor %}
+{% else %}
+<p class="muted">No questions yet.</p>
+{% endfor %}
+{% endblock %}

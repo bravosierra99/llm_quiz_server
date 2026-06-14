@@ -15,6 +15,9 @@
       <input type="checkbox" name="chapter_ids" value="{{ c.id }}"
              {{ 'disabled' if c.question_count == 0 else '' }}>
       {{ c.name }} <span class="muted">({{ c.question_count }} Q)</span>
+      {% if c.progress and c.progress.status not in ('empty',) %}
+        <span class="badge mastery-{{ c.progress.status }}">{{ c.progress.label }}</span>
+      {% endif %}
     </label>
   {% endfor %}
 
@@ -24,11 +27,14 @@
     </label>
     <label>Order
       <select name="order">
+        <option value="adaptive">Smart (adaptive)</option>
         <option value="shuffle">Shuffle</option>
         <option value="ordered">In order</option>
       </select>
     </label>
   </div>
+  <p class="muted">Smart mode prioritises what you're due to review and
+    introduces new questions gradually, so a fresh chapter may serve fewer than you ask for.</p>
   <button type="submit" class="primary">Start quiz →</button>
 </form>
 {% else %}

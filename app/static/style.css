@@ -76,6 +76,20 @@ form { margin: 0; }
 .type-truefalse { color: #d2a8ff; }
 .type-short { color: #f0a868; }
 
+.badge {
+  display: inline-block; margin-top: .4rem; padding: .15rem .55rem;
+  border-radius: 999px; font-size: .75rem; font-weight: 600;
+}
+.mastery-mastered { background: rgba(46,160,67,.18); color: var(--good); border: 1px solid var(--good); }
+.mastery-review   { background: rgba(229,83,75,.15); color: #f0a868; border: 1px solid var(--danger); }
+.mastery-learning { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+.mastery-new      { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+
+.ai-review {
+  white-space: pre-wrap; font: inherit; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: .8rem 1rem; margin: 0;
+}
+
 table.data { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 table.data th, table.data td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--border); }
 table.data th { color: var(--muted); font-weight: 600; font-size: .85rem; }
