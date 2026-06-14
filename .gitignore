@@ -8,3 +8,7 @@ data/
 
 # Private, environment-specific deployment notes (network topology, hosts, domains)
 *.local.md
+
+# Generated study artifacts (knowledge bases + question banks)
+research/
+banks/
