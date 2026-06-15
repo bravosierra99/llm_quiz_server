@@ -133,7 +133,7 @@ def _clean_question(raw):
     }, None
 
 
-def _chat(messages, max_tokens=4096):
+def _chat(messages):
     headers = {"Content-Type": "application/json"}
     if AI_API_KEY:
         headers["Authorization"] = f"Bearer {AI_API_KEY}"
@@ -141,7 +141,8 @@ def _chat(messages, max_tokens=4096):
         "model": AI_MODEL,
         "messages": messages,
         "temperature": 0.4,
-        "max_tokens": max_tokens,
+        # No max_tokens: a hard cap truncates replies mid-thought (a recurring
+        # foot-gun). Length is controlled by the prompts, not by truncation.
     }
     with httpx.Client(timeout=AI_TIMEOUT) as client:
         resp = client.post(f"{AI_BASE_URL}/chat/completions", json=payload, headers=headers)
@@ -310,7 +311,7 @@ def tutor(context_block, history, user_message):
     ]
     messages.extend({"role": m["role"], "content": m["content"]} for m in history)
     messages.append({"role": "user", "content": user_message})
-    return (_chat(messages, max_tokens=500) or "").strip()
+    return (_chat(messages) or "").strip()
 
 
 def verify_and_fix(question, context, kb_text, search_text):
