@@ -91,6 +91,25 @@ def grade(conn, user_id, question_id, correct):
     )
 
 
+def mark_mastered(conn, user_id, question_id):
+    """Force a question to 'mastered' for this user — for an 'it's too easy'
+    button. Sets enough reps and a long interval (so chapter_progress counts it
+    mastered) and pushes due_at out by that interval so it won't resurface soon."""
+    now = _now()
+    due = now + timedelta(days=MASTERED_INTERVAL_DAYS)
+    conn.execute(
+        """INSERT INTO review_state
+               (user_id, question_id, ease, interval_days, reps, lapses, due_at, last_reviewed)
+           VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+           ON CONFLICT(user_id, question_id) DO UPDATE SET
+               interval_days=excluded.interval_days,
+               reps=MAX(review_state.reps, excluded.reps),
+               due_at=excluded.due_at, last_reviewed=excluded.last_reviewed""",
+        (user_id, question_id, EASE_START, float(MASTERED_INTERVAL_DAYS),
+         LEARNED_REPS, _fmt(due), _fmt(now)),
+    )
+
+
 # --------------------------------------------------------------------------
 # Selection
 # --------------------------------------------------------------------------

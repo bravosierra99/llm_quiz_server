@@ -29,11 +29,18 @@
     <div class="card {{ 'correct-row' if p.kind == 'edit' else '' }}">
       <p class="prompt">{{ p.prompt }}</p>
       {% if p.choices %}<p class="muted">Choices: {{ p.choices|join(' · ') }}</p>{% endif %}
-      <p class="answer"><strong>Answer:</strong> {{ p.answer }}</p>
-      {% if p.explanation %}<p class="muted explanation">{{ p.explanation }}</p>{% endif %}
+      {% if p.kind == 'edit' %}
+        {# Flag-fix: show the full correction so you can judge it. #}
+        <p class="answer"><strong>Answer:</strong> {{ p.answer }}</p>
+        {% if p.explanation %}<p class="muted explanation">{{ p.explanation }}</p>{% endif %}
+      {% else %}
+        {# New question: judge the question itself; the answer stays hidden so it
+           isn't spoiled before you're quizzed on it. #}
+        <p class="muted small">Answer hidden — you'll see it when this comes up in a quiz.</p>
+      {% endif %}
     </div>
 
-    {% if p.rationale %}<p class="muted small">💡 {{ p.rationale }}</p>{% endif %}
+    {% if p.rationale and p.kind == 'edit' %}<p class="muted small">💡 {{ p.rationale }}</p>{% endif %}
 
     <div class="actions row-actions">
       <form method="post" action="/proposals/{{ p.id }}/approve">

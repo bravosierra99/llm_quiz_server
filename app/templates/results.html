@@ -54,11 +54,20 @@
       <input type="hidden" name="back" value="/quiz/{{ session.id }}/results">
       <button type="submit" class="btn small">{{ '🚩 Unflag' if r.question_id in flagged_ids else '🚩 Flag for review' }}</button>
     </form>
+    <form method="post" action="/questions/{{ r.question_id }}/master">
+      <input type="hidden" name="back" value="/quiz/{{ session.id }}/results">
+      <button type="submit" class="btn small">😎 Mark mastered</button>
+    </form>
     {% if is_admin %}
     <form method="post" action="/questions/{{ r.question_id }}/generate-more"
           onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Generating…';">
       <input type="hidden" name="back" value="/quiz/{{ session.id }}/results">
       <button type="submit" class="btn small">✨ Generate more like this</button>
+    </form>
+    <form method="post" action="/questions/{{ r.question_id }}/delete"
+          onsubmit="return confirm('Delete this question for everyone? This cannot be undone.')">
+      <input type="hidden" name="back" value="/quiz/{{ session.id }}/results">
+      <button type="submit" class="btn small danger">🗑 Delete</button>
     </form>
     {% endif %}
   </div>

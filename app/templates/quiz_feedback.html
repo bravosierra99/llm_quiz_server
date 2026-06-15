@@ -37,11 +37,23 @@
     </button>
   </form>
 
+  <form method="post" action="/questions/{{ q.id }}/master">
+    <input type="hidden" name="back" value="{{ back }}">
+    <button type="submit" class="btn">😎 Too easy — mark mastered</button>
+  </form>
+
   {% if is_admin %}
   <form method="post" action="/questions/{{ q.id }}/generate-more"
         onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Generating… (~1–2 min)';">
     <input type="hidden" name="back" value="{{ back }}">
     <button type="submit" class="btn">✨ Generate more like this</button>
+  </form>
+  <form method="post" action="/questions/{{ q.id }}/delete"
+        onsubmit="return confirm('Delete this question for everyone? This cannot be undone.')">
+    {# After deletion the queue shifts down one, so q/{{ idx }} shows the next
+       question (or results if this was the last). #}
+    <input type="hidden" name="back" value="/quiz/{{ session.id }}/q/{{ idx }}">
+    <button type="submit" class="btn danger">🗑 Delete question</button>
   </form>
   {% endif %}
 

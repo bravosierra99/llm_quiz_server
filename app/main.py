@@ -376,14 +376,17 @@ def update_question(request: Request, question_id: int, type: str = Form(...),
 
 
 @app.post("/questions/{question_id}/delete")
-def delete_question(request: Request, question_id: int):
+def delete_question(request: Request, question_id: int, back: str = Form("")):
     _, redirect = require_admin(request)
     if redirect:
         return redirect
     with get_conn() as conn:
         cid = conn.execute("SELECT chapter_id FROM questions WHERE id = ?", (question_id,)).fetchone()
         conn.execute("DELETE FROM questions WHERE id = ?", (question_id,))
-    return RedirectResponse(f"/chapters/{cid['chapter_id']}" if cid else "/", status_code=303)
+    # `back` lets the quiz screens send you somewhere sensible; chapter view is
+    # the default for the content-management delete.
+    dest = _safe_back(back) if back else (f"/chapters/{cid['chapter_id']}" if cid else "/")
+    return RedirectResponse(dest, status_code=303)
 
 
 # --------------------------------------------------------------------------
@@ -777,6 +780,19 @@ def resolve_flag(request: Request, question_id: int):
             "UPDATE question_flags SET resolved_at = datetime('now') "
             "WHERE question_id = ? AND resolved_at IS NULL", (question_id,))
     return RedirectResponse("/analytics", status_code=303)
+
+
+@app.post("/questions/{question_id}/master")
+def master_question(request: Request, question_id: int, back: str = Form("/")):
+    """Mark a question 'mastered' for the current user — an 'it's too easy' button.
+    Per-user (just suppresses it from your own future quizzes), so any profile may
+    do it; nothing about the question itself changes."""
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        scheduler.mark_mastered(conn, user["id"], question_id)
+    return RedirectResponse(_safe_back(back), status_code=303)
 
 
 @app.post("/questions/{question_id}/generate-more")
