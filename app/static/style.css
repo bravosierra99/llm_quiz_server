@@ -97,6 +97,13 @@ form { margin: 0; }
 .end-quiz { margin-top: 1rem; }
 .quiz-nav { display: flex; align-items: center; gap: .6rem; margin: .2rem 0 .8rem; flex-wrap: wrap; }
 
+.tutor-thread { display: flex; flex-direction: column; gap: .6rem; margin: 1rem 0; }
+.tutor-msg { padding: .55rem .8rem; border-radius: 10px; border: 1px solid var(--border); }
+.tutor-user { background: var(--panel-2); }
+.tutor-assistant { background: var(--panel); }
+.tutor-who { font-size: .7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.tutor-text { white-space: pre-wrap; margin: .25rem 0 0; }
+
 table.data { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 table.data th, table.data td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--border); }
 table.data th { color: var(--muted); font-weight: 600; font-size: .85rem; }

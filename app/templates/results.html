@@ -54,6 +54,21 @@
       <input type="hidden" name="back" value="/quiz/{{ session.id }}/results">
       <button type="submit" class="btn small">{{ '🚩 Unflag' if r.question_id in flagged_ids else '🚩 Flag for review' }}</button>
     </form>
+    {% if r.answered and not r.is_correct %}
+    <form method="post" action="/questions/{{ r.question_id }}/tutor"
+          onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Thinking…';">
+      <input type="hidden" name="mode" value="why_wrong">
+      <input type="hidden" name="session_id" value="{{ session.id }}">
+      <input type="hidden" name="back" value="/quiz/{{ session.id }}/results">
+      <button type="submit" class="btn small">❓ Why wrong?</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/questions/{{ r.question_id }}/tutor"
+          onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Thinking…';">
+      <input type="hidden" name="mode" value="teach">
+      <input type="hidden" name="back" value="/quiz/{{ session.id }}/results">
+      <button type="submit" class="btn small">📚 Teach me</button>
+    </form>
     <form method="post" action="/questions/{{ r.question_id }}/master">
       <input type="hidden" name="back" value="/quiz/{{ session.id }}/results">
       <button type="submit" class="btn small">😎 Mark mastered</button>

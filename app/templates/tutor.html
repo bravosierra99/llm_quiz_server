@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Tutor · FleetQuiz{% endblock %}
+{% block body %}
+<p class="muted"><a href="{{ back or '/quiz' }}">← Back</a></p>
+<h1>📚 Tutor</h1>
+
+<div class="card">
+  <span class="pill type-{{ q.type }}">{{ q.type }}</span>
+  <p class="prompt">{{ q.prompt }}</p>
+  <p class="muted small">{{ q.subject }} · {{ q.chapter }}</p>
+</div>
+
+{% if messages %}
+<div class="tutor-thread">
+  {% for m in messages %}
+  <div class="tutor-msg tutor-{{ m.role }}">
+    <span class="tutor-who">{{ 'You' if m.role == 'user' else 'Tutor' }}</span>
+    <p class="tutor-text">{{ m.content }}</p>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted">Ask the tutor anything about this question or topic.</p>
+{% endif %}
+
+<form method="post" action="/tutor/{{ question_id }}/ask" class="stack card"
+      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Thinking…';">
+  <input type="hidden" name="back" value="{{ back or '' }}">
+  <label>Ask a follow-up
+    <textarea name="message" rows="2" required
+              placeholder="e.g. Can you show me another example?"></textarea>
+  </label>
+  <button type="submit" class="primary">Ask →</button>
+</form>
+{% endblock %}

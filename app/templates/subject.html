@@ -11,6 +11,20 @@
 </div>
 {% if subject.description %}<p>{{ subject.description }}</p>{% endif %}
 
+{% if is_admin %}
+<div class="card">
+  <h3>Teaching notes <span class="muted small">— steer the tutor for this subject</span></h3>
+  <p class="muted small">Tells the tutor who it's helping and how to pitch explanations.
+    e.g. <em>"For my 6-year-old — short, gentle, lots of encouragement, invite a
+    follow-up."</em></p>
+  <form method="post" action="/subjects/{{ subject.id }}/teaching-notes" class="stack">
+    <textarea name="teaching_notes" rows="3"
+      placeholder="How should the tutor explain things for this subject?">{{ subject.teaching_notes or '' }}</textarea>
+    <button type="submit" class="primary">Save teaching notes</button>
+  </form>
+</div>
+{% endif %}
+
 <h2>Chapters</h2>
 {% if chapters %}
 <div class="cards">

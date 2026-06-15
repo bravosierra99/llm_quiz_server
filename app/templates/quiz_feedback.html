@@ -37,6 +37,22 @@
     </button>
   </form>
 
+  {% if answer and not answer.is_correct %}
+  <form method="post" action="/questions/{{ q.id }}/tutor"
+        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Thinking…';">
+    <input type="hidden" name="mode" value="why_wrong">
+    <input type="hidden" name="session_id" value="{{ session.id }}">
+    <input type="hidden" name="back" value="{{ back }}">
+    <button type="submit" class="btn">❓ Why was I wrong?</button>
+  </form>
+  {% endif %}
+  <form method="post" action="/questions/{{ q.id }}/tutor"
+        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Thinking…';">
+    <input type="hidden" name="mode" value="teach">
+    <input type="hidden" name="back" value="{{ back }}">
+    <button type="submit" class="btn">📚 Teach me this topic</button>
+  </form>
+
   <form method="post" action="/questions/{{ q.id }}/master">
     <input type="hidden" name="back" value="{{ back }}">
     <button type="submit" class="btn">😎 Too easy — mark mastered</button>

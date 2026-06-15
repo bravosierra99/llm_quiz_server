@@ -169,8 +169,21 @@ CREATE TABLE IF NOT EXISTS proposals (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- A learner's tutor chat, grounded per question. One ongoing thread per
+-- (user, question); the LLM context (teaching notes + chapter KB + the question)
+-- is rebuilt from live data each turn, so only the conversation lives here.
+CREATE TABLE IF NOT EXISTS tutor_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    role        TEXT NOT NULL CHECK (role IN ('user','assistant')),
+    content     TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_chapters_subject ON chapters(subject_id);
 CREATE INDEX IF NOT EXISTS idx_user_subjects_user ON user_subjects(user_id);
+CREATE INDEX IF NOT EXISTS idx_tutor_user_q ON tutor_messages(user_id, question_id, id);
 CREATE INDEX IF NOT EXISTS idx_flags_question ON question_flags(question_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
@@ -192,6 +205,8 @@ def init_db():
                                "INTEGER REFERENCES sources(id) ON DELETE SET NULL")
         _add_column_if_missing(conn, "quiz_sessions", "endless",
                                "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, "subjects", "teaching_notes",
+                               "TEXT NOT NULL DEFAULT ''")
 
 
 def _add_column_if_missing(conn, table, column, decl):

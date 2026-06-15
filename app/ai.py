@@ -133,7 +133,7 @@ def _clean_question(raw):
     }, None
 
 
-def _chat(messages):
+def _chat(messages, max_tokens=4096):
     headers = {"Content-Type": "application/json"}
     if AI_API_KEY:
         headers["Authorization"] = f"Bearer {AI_API_KEY}"
@@ -141,7 +141,7 @@ def _chat(messages):
         "model": AI_MODEL,
         "messages": messages,
         "temperature": 0.4,
-        "max_tokens": 4096,
+        "max_tokens": max_tokens,
     }
     with httpx.Client(timeout=AI_TIMEOUT) as client:
         resp = client.post(f"{AI_BASE_URL}/chat/completions", json=payload, headers=headers)
@@ -283,6 +283,34 @@ for "truefalse" "True" or "False"; for "short" a concise canonical answer.
 
 If the question is already correct, set "needs_fix" to false and echo the existing \
 fields unchanged. Prefer the knowledge base and search results over assumptions."""
+
+
+TUTOR_SYSTEM = """You are a patient, encouraging tutor helping one learner understand \
+a topic. Use the LEARNER NOTES to pitch your explanation at the right level and tone, \
+and rely on the STUDY MATERIAL for facts. Explain clearly in small steps, give simple \
+examples, and invite the learner to keep asking — exploring is good. If they drift far \
+off the topic, gently steer back. Keep replies short and to the point. Never produce \
+unsafe, adult, or harmful content; if you are unsure of a fact, say so simply. Reply \
+in plain text — no markdown, asterisks, or headers."""
+
+# Naive char cap on the injected knowledge base. Fine for small KBs; for very
+# large ones this can lop off the relevant section (known limitation — a future
+# version could retrieve just the relevant passage).
+TUTOR_KB_CHARS = 6000
+
+
+def tutor(context_block, history, user_message):
+    """One tutor turn. `context_block` is the rebuilt-each-turn grounding (learner
+    notes + KB + question); `history` is the stored [{role, content}] conversation;
+    `user_message` is the new learner message. Returns plain-text reply or raises
+    httpx errors for the caller to degrade on. Does no DB work."""
+    messages = [
+        {"role": "system", "content": TUTOR_SYSTEM},
+        {"role": "user", "content": context_block},
+    ]
+    messages.extend({"role": m["role"], "content": m["content"]} for m in history)
+    messages.append({"role": "user", "content": user_message})
+    return (_chat(messages, max_tokens=500) or "").strip()
 
 
 def verify_and_fix(question, context, kb_text, search_text):

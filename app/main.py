@@ -7,6 +7,7 @@ on any device with no build step. Routes are grouped: identity, library
 import json
 import os
 import random
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
@@ -807,6 +808,157 @@ def generate_more(request: Request, question_id: int, back: str = Form("/")):
     dest = _safe_back(back)
     sep = "&" if "?" in dest else "?"
     return RedirectResponse(f"{dest}{sep}queued=1", status_code=303)
+
+
+# --------------------------------------------------------------------------
+# Tutor — a grounded, per-question chat that explains the answer or the topic.
+# Thin generic system prompt; the per-subject teaching notes + chapter KB do the
+# steering (see ai.TUTOR_SYSTEM). LLM calls happen OUTSIDE any open connection.
+# --------------------------------------------------------------------------
+TUTOR_HISTORY_LIMIT = 16  # messages of context sent to the model
+TUTOR_INTENTS = {
+    "why_wrong": "I got this question wrong. Why is my answer not right, and how "
+                 "should I think about it?",
+    "teach": "Can you teach me about this topic?",
+}
+
+
+def _tutor_context_row(conn, question_id):
+    row = conn.execute("""
+        SELECT q.id, q.type, q.prompt, q.answer, q.explanation,
+               c.name AS chapter, s.name AS subject, s.teaching_notes AS notes,
+               src.content AS kb
+        FROM questions q
+        JOIN chapters c ON q.chapter_id = c.id
+        JOIN subjects s ON c.subject_id = s.id
+        LEFT JOIN sources src ON q.source_id = src.id
+        WHERE q.id = ?""", (question_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def _tutor_context_block(ctx, learner_answer=None):
+    kb = (ctx.get("kb") or "").strip()
+    if len(kb) > ai.TUTOR_KB_CHARS:
+        kb = kb[:ai.TUTOR_KB_CHARS] + "\n…(material truncated)"
+    notes = (ctx.get("notes") or "").strip() or \
+        "(none provided — judge the right level from the subject and topic names)"
+    parts = [
+        f"LEARNER NOTES (how to teach this person): {notes}",
+        f"SUBJECT: {ctx['subject']}",
+        f"TOPIC (chapter): {ctx['chapter']}",
+        f"STUDY MATERIAL:\n{kb or '(none)'}",
+        f"THE QUESTION THEY ARE WORKING ON:\n{ctx['prompt']}\nCorrect answer: "
+        f"{ctx['answer']}" + (f"\nExplanation: {ctx['explanation']}"
+                              if ctx['explanation'] else ""),
+    ]
+    if learner_answer:
+        parts.append(f"The learner's answer was: {learner_answer!r} — which is INCORRECT.")
+    return "\n\n".join(parts)
+
+
+def _tutor_call(block, history, user_message):
+    """Run one tutor turn, degrading to a friendly message on any failure so the
+    chat thread stays consistent."""
+    try:
+        return ai.tutor(block, history[-TUTOR_HISTORY_LIMIT:], user_message) \
+            or "(The tutor didn't say anything — try asking again.)"
+    except Exception:  # noqa: BLE001 - connection/HTTP/parse all degrade the same
+        return "I couldn't reach the tutor right now. Please try again in a moment."
+
+
+def _store_tutor(conn, user_id, qid, user_msg, assistant_msg):
+    conn.execute("INSERT INTO tutor_messages (user_id, question_id, role, content) "
+                 "VALUES (?, ?, 'user', ?)", (user_id, qid, user_msg))
+    conn.execute("INSERT INTO tutor_messages (user_id, question_id, role, content) "
+                 "VALUES (?, ?, 'assistant', ?)", (user_id, qid, assistant_msg))
+
+
+def _tutor_url(question_id, back=""):
+    url = f"/tutor/{question_id}"
+    b = _safe_back(back) if back else ""
+    if b and b != "/":
+        url += "?back=" + quote(b, safe="/")
+    return url
+
+
+@app.post("/subjects/{subject_id}/teaching-notes")
+def save_teaching_notes(request: Request, subject_id: int,
+                        teaching_notes: str = Form(""), back: str = Form("")):
+    """Admin: free-text notes that steer the tutor's level/tone for this subject."""
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        conn.execute("UPDATE subjects SET teaching_notes = ? WHERE id = ?",
+                     (teaching_notes.strip(), subject_id))
+    return RedirectResponse(_safe_back(back) if back else f"/subjects/{subject_id}",
+                            status_code=303)
+
+
+@app.post("/questions/{question_id}/tutor")
+def tutor_start(request: Request, question_id: int, mode: str = Form("teach"),
+                session_id: str = Form(""), back: str = Form("/")):
+    """Seed a tutor thread from a quiz screen ('Why was I wrong?' / 'Teach me')."""
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    intent = TUTOR_INTENTS.get(mode, TUTOR_INTENTS["teach"])
+    with get_conn() as conn:  # load + CLOSE before the slow model call
+        ctx = _tutor_context_row(conn, question_id)
+        if not ctx:
+            return RedirectResponse(_safe_back(back), status_code=303)
+        learner_answer = None
+        if mode == "why_wrong" and session_id.isdigit():
+            a = conn.execute(
+                "SELECT user_answer FROM answers WHERE session_id = ? AND question_id = ?",
+                (int(session_id), question_id)).fetchone()
+            learner_answer = a["user_answer"] if a else None
+        history = [dict(r) for r in conn.execute(
+            "SELECT role, content FROM tutor_messages WHERE user_id = ? AND question_id = ? "
+            "ORDER BY id", (user["id"], question_id))]
+    block = _tutor_context_block(ctx, learner_answer)
+    reply = _tutor_call(block, history, intent)
+    with get_conn() as conn:
+        _store_tutor(conn, user["id"], question_id, intent, reply)
+    return RedirectResponse(_tutor_url(question_id, back), status_code=303)
+
+
+@app.get("/tutor/{question_id}", response_class=HTMLResponse)
+def tutor_thread(request: Request, question_id: int):
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        ctx = _tutor_context_row(conn, question_id)
+        if not ctx:
+            return RedirectResponse("/", status_code=303)
+        messages = [dict(r) for r in conn.execute(
+            "SELECT role, content FROM tutor_messages WHERE user_id = ? AND question_id = ? "
+            "ORDER BY id", (user["id"], question_id))]
+    return render(request, "tutor.html", q=ctx, messages=messages,
+                  question_id=question_id, back=request.query_params.get("back", ""))
+
+
+@app.post("/tutor/{question_id}/ask")
+def tutor_ask(request: Request, question_id: int, message: str = Form(""),
+              back: str = Form("")):
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    msg = message.strip()
+    if not msg:
+        return RedirectResponse(_tutor_url(question_id, back), status_code=303)
+    with get_conn() as conn:  # load + CLOSE before the model call
+        ctx = _tutor_context_row(conn, question_id)
+        if not ctx:
+            return RedirectResponse("/", status_code=303)
+        history = [dict(r) for r in conn.execute(
+            "SELECT role, content FROM tutor_messages WHERE user_id = ? AND question_id = ? "
+            "ORDER BY id", (user["id"], question_id))]
+    reply = _tutor_call(_tutor_context_block(ctx), history, msg)
+    with get_conn() as conn:
+        _store_tutor(conn, user["id"], question_id, msg, reply)
+    return RedirectResponse(_tutor_url(question_id, back), status_code=303)
 
 
 @app.get("/history", response_class=HTMLResponse)
