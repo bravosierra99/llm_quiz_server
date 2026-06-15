@@ -613,8 +613,9 @@ def quiz_answer(request: Request, session_id: int, idx: int,
             scheduler.grade(conn, session["user_id"], q["id"], bool(is_correct))
         # Endless: once the last queued question is answered, append the next
         # adaptive question (excluding ones already served this session). When the
-        # pool is exhausted, nothing is appended and "Next" leads to results.
+        # pool is exhausted, nothing is appended and we fall through to results.
         # The append lives here in the POST so GET stays read-only.
+        appended = False
         if session["endless"] and not session["finished_at"] and idx == len(qids) - 1:
             nxt = scheduler.select_question_ids(
                 conn, session["user_id"], jloads(session["chapter_ids"]), 1, "adaptive",
@@ -623,8 +624,17 @@ def quiz_answer(request: Request, session_id: int, idx: int,
                 conn.execute(
                     "INSERT INTO session_questions (session_id, position, question_id) VALUES (?, ?, ?)",
                     (session_id, len(qids), nxt[0]))
-    # PRG: redirect to the feedback screen (survives refresh, shows right/wrong).
-    return RedirectResponse(f"/quiz/{session_id}/f/{idx}", status_code=303)
+                appended = True
+    has_next = (idx + 1) < len(qids) or appended
+    # PRG (all targets survive refresh). Get-it-right: don't interrupt — go
+    # straight to the next question; the question screen offers a "previous
+    # question" button to flag / generate-more on the one just answered. Miss it:
+    # stop on the feedback screen so the correct answer is seen.
+    if is_correct:
+        dest = f"/quiz/{session_id}/q/{idx + 1}" if has_next else f"/quiz/{session_id}/results"
+    else:
+        dest = f"/quiz/{session_id}/f/{idx}"
+    return RedirectResponse(dest, status_code=303)
 
 
 @app.get("/quiz/{session_id}/f/{idx}", response_class=HTMLResponse)
