@@ -32,8 +32,8 @@
 
   <form method="post" action="/questions/{{ q.id }}/flag">
     <input type="hidden" name="back" value="{{ back }}">
-    <button type="submit" class="btn" {{ 'disabled' if flagged else '' }}>
-      {{ '🚩 Flagged' if flagged else '🚩 Flag for review' }}
+    <button type="submit" class="btn">
+      {{ '🚩 Unflag' if flagged else '🚩 Flag for review' }}
     </button>
   </form>
 

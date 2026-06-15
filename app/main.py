@@ -6,6 +6,7 @@ on any device with no build step. Routes are grouped: identity, library
 """
 import json
 import os
+import random
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
@@ -480,6 +481,11 @@ def quiz_start(request: Request, chapter_ids: list[int] = Form(default=[]),
         qids = scheduler.select_question_ids(conn, user["id"], chapter_ids, seed_n, order)
         if not qids:
             return RedirectResponse("/quiz", status_code=303)
+        # Selection stays adaptive (which questions), but for a fixed quiz we
+        # shuffle the presentation order so it doesn't always lead with the ones
+        # you missed. Endless serves most-due first (one at a time).
+        if not is_endless and order == "adaptive":
+            random.shuffle(qids)
         names = conn.execute(
             f"SELECT name FROM chapters WHERE id IN ({placeholders})", chapter_ids).fetchall()
         label = ", ".join(n["name"] for n in names)
@@ -641,10 +647,14 @@ def quiz_results(request: Request, session_id: int):
     rows.sort(key=lambda r: (2 if not r["answered"] else (0 if not r["is_correct"] else 1)))
     missed_ids = [r["question_id"] for r in rows if r["answered"] and not r["is_correct"]]
     unanswered = sum(1 for r in rows if not r["answered"])
+    with get_conn() as conn:
+        flagged_ids = {r["question_id"] for r in conn.execute(
+            "SELECT question_id FROM question_flags WHERE user_id = ? AND resolved_at IS NULL",
+            (user["id"],))}
     return render(request, "results.html", session=dict(session), rows=rows,
                   correct=correct, total=len(answered), unanswered=unanswered,
                   missed_ids=missed_ids, is_admin=bool(user.get("is_admin")),
-                  added=request.query_params.get("added"))
+                  flagged_ids=flagged_ids, added=request.query_params.get("added"))
 
 
 @app.post("/quiz/retry-missed")
@@ -673,17 +683,25 @@ def quiz_retry_missed(request: Request, question_ids: str = Form(...), label: st
 @app.post("/questions/{question_id}/flag")
 def flag_question(request: Request, question_id: int,
                   back: str = Form("/"), note: str = Form("")):
-    """Any signed-in user can flag a question for review (one active flag per
-    person per question). Surfaced to the admin in Analytics."""
+    """Toggle a review flag for the current user on this question (flag if not
+    flagged, unflag if already flagged). One active flag per person per question;
+    surfaced to the admin in Analytics."""
     user, redirect = require_user(request)
     if redirect:
         return redirect
     with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO question_flags (question_id, user_id, note) VALUES (?, ?, ?)
-               ON CONFLICT(question_id, user_id) DO UPDATE SET
-                   resolved_at = NULL, created_at = datetime('now'), note = excluded.note""",
-            (question_id, user["id"], note.strip()))
+        active = conn.execute(
+            "SELECT id FROM question_flags WHERE question_id = ? AND user_id = ? AND resolved_at IS NULL",
+            (question_id, user["id"])).fetchone()
+        if active:
+            conn.execute("UPDATE question_flags SET resolved_at = datetime('now') WHERE id = ?",
+                         (active["id"],))
+        else:
+            conn.execute(
+                """INSERT INTO question_flags (question_id, user_id, note) VALUES (?, ?, ?)
+                   ON CONFLICT(question_id, user_id) DO UPDATE SET
+                       resolved_at = NULL, created_at = datetime('now'), note = excluded.note""",
+                (question_id, user["id"], note.strip()))
     return RedirectResponse(_safe_back(back), status_code=303)
 
 
@@ -713,11 +731,19 @@ def generate_more(request: Request, question_id: int, back: str = Form("/")):
             return RedirectResponse(_safe_back(back), status_code=303)
         q = dict(q)
         chapter = conn.execute("SELECT * FROM chapters WHERE id = ?", (q["chapter_id"],)).fetchone()
+        subject = conn.execute(
+            "SELECT s.* FROM subjects s JOIN chapters c ON c.subject_id = s.id WHERE c.id = ?",
+            (q["chapter_id"],)).fetchone()
         src = sources.get(conn, q["source_id"]) if q["source_id"] else None
 
-    topic = (f"Chapter: {chapter['name']}. Write more questions in the same style and "
-             f"difficulty as this one, on closely related material (do NOT duplicate it): "
-             f"\"{q['prompt']}\"")
+    # Give the model the full picture: the library/subject and its stated goal,
+    # the chapter, the seed question, and (below) the chapter's knowledge base.
+    ctx = f"Subject/library: {subject['name']}."
+    if subject["description"]:
+        ctx += f" The point of this subject: {subject['description']}."
+    topic = (f"{ctx} Chapter: {chapter['name']}. Write more questions in the same style and "
+             f"difficulty as this one, on closely related material from this chapter "
+             f"(do NOT duplicate it): \"{q['prompt']}\"")
     src_text = sources.text_for_generation(src) if src else ""
     result = ai.generate_questions("source" if src_text else "topic", topic, src_text,
                                    5, "medium", [q["type"]])

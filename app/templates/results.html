@@ -46,7 +46,7 @@
   <div class="actions row-actions">
     <form method="post" action="/questions/{{ r.question_id }}/flag">
       <input type="hidden" name="back" value="/quiz/{{ session.id }}/results">
-      <button type="submit" class="btn small">🚩 Flag for review</button>
+      <button type="submit" class="btn small">{{ '🚩 Unflag' if r.question_id in flagged_ids else '🚩 Flag for review' }}</button>
     </form>
     {% if is_admin %}
     <form method="post" action="/questions/{{ r.question_id }}/generate-more"

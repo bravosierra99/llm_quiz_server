@@ -5,6 +5,10 @@
 {% if chapters %}
 <form method="post" action="/quiz/start" class="stack card">
   <p>Pick one or more chapters to quiz on:</p>
+  <label class="check select-all">
+    <input type="checkbox" id="select-all" onclick="toggleAllChapters(this)">
+    <strong>Select all chapters</strong>
+  </label>
   {% set current_subject = namespace(name=None) %}
   {% for c in chapters %}
     {% if c.subject_name != current_subject.name %}
@@ -20,6 +24,11 @@
       {% endif %}
     </label>
   {% endfor %}
+
+  <p class="muted small">Badges: <strong>to review</strong> = questions due for
+    spaced-repetition review (includes ones you've missed) · <strong>learned</strong>
+    = answered enough to be on a long review interval · <strong>Mastered</strong> =
+    all learned and none currently due.</p>
 
   <div class="grid-3">
     <label>Number of questions
@@ -41,6 +50,12 @@
     introduces new questions gradually, so a fresh chapter may serve fewer than you ask for.</p>
   <button type="submit" class="primary">Start quiz →</button>
 </form>
+<script>
+function toggleAllChapters(box) {
+  document.querySelectorAll('input[name="chapter_ids"]:not([disabled])')
+    .forEach(cb => cb.checked = box.checked);
+}
+</script>
 {% else %}
 <p class="muted">No questions exist yet. <a href="/">Add some content first.</a></p>
 {% endif %}

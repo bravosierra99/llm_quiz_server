@@ -183,7 +183,7 @@ def chapter_progress(conn, user_id, chapter_id):
     if learned == total and due == 0:
         status, label = "mastered", "Mastered ✓"
     elif due > 0:
-        status, label = "review", f"{due} due"
+        status, label = "review", f"{due} to review"
     elif seen == 0:
         status, label = "new", "Not started"
     else:
