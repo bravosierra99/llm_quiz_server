@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 
 from . import ai, auth, scheduler, sources
 from .db import get_conn, init_db, jloads
+from .importer import import_bank_data
 
 BASE_DIR = os.path.dirname(__file__)
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -684,6 +685,47 @@ def analytics_ai_review(request: Request):
         subjects, weak = _question_stats(conn)
     ai_review = ai.review_results(weak)
     return render(request, "analytics.html", subjects=subjects, weak=weak, ai_review=ai_review)
+
+
+# --------------------------------------------------------------------------
+# Knowledge import  (admin only) — bulk-load a question-bank JSON
+# --------------------------------------------------------------------------
+# Admin-gated like every other mutation. This is no more privileged than the
+# existing AI-generate / delete routes; the hard network boundary (LAN / SSO)
+# remains the reverse proxy's job — see the README security model.
+@app.get("/import", response_class=HTMLResponse)
+def import_form(request: Request):
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    return render(request, "import.html", result=None, error=None)
+
+
+@app.post("/import", response_class=HTMLResponse)
+async def import_run(request: Request):
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    upload = form.get("file")
+    raw = None
+    if upload is not None and getattr(upload, "filename", ""):
+        raw = await upload.read()
+    elif (form.get("json") or "").strip():
+        raw = form.get("json").encode("utf-8")
+    if not raw:
+        return render(request, "import.html", result=None,
+                      error="Upload a bank JSON file or paste JSON.")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return render(request, "import.html", result=None, error=f"Invalid JSON: {e}")
+    try:
+        result = import_bank_data(data)
+    except (KeyError, TypeError) as e:
+        return render(request, "import.html", result=None,
+                      error=f"Bad bank structure (need subject + chapters): {e}")
+    return render(request, "import.html", result=result, error=None)
 
 
 @app.get("/healthz")

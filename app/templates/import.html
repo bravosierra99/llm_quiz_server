@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Import knowledge · FleetQuiz{% endblock %}
+{% block body %}
+<h1>Import a question bank</h1>
+<p class="muted">Bulk-load a subject's chapters and questions from a bank JSON
+  file (the output of the research → quiz-writer pipeline). Idempotent: importing
+  the same bank again skips questions that already exist, so it's safe to re-run
+  or to append more questions to an existing subject.</p>
+
+{% if result %}
+<div class="flash">
+  Imported into <strong><a href="/subjects/{{ result.subject_id }}">{{ result.subject }}</a></strong>:
+  +{{ result.chapters }} chapters, <strong>+{{ result.questions }} questions</strong>,
+  +{{ result.sources }} sources
+  ({{ result.skipped_dupe }} duplicates skipped, {{ result.rejected }} rejected).
+</div>
+{% endif %}
+{% if error %}
+<p class="flash error">{{ error }}</p>
+{% endif %}
+
+<form method="post" action="/import" enctype="multipart/form-data" class="stack card">
+  <label>Bank JSON file
+    <input type="file" name="file" accept=".json,application/json">
+  </label>
+  <label>…or paste JSON
+    <textarea name="json" rows="8" placeholder='{"subject": {...}, "chapters": [ ... ]}'></textarea>
+  </label>
+  <button type="submit" class="primary">Import →</button>
+</form>
+
+<details class="card">
+  <summary>Expected JSON shape</summary>
+<pre class="ai-review">{
+  "subject": {"name": "...", "description": "..."},
+  "chapters": [
+    {
+      "name": "Chapter 1 — ...",
+      "source": {"title": "...", "content": "...markdown knowledge base..."},
+      "questions": [
+        {"type": "mcq", "prompt": "...", "choices": ["A","B","C","D"],
+         "answer": "B", "explanation": "..."},
+        {"type": "truefalse", "prompt": "...", "answer": "True", "explanation": "..."},
+        {"type": "short", "prompt": "...", "answer": "...", "explanation": "..."}
+      ]
+    }
+  ]
+}</pre>
+</details>
+{% endblock %}
