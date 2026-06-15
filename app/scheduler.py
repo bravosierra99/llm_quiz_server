@@ -116,10 +116,12 @@ def mark_mastered(conn, user_id, question_id):
 def select_question_ids(conn, user_id, chapter_ids, limit, order="adaptive", exclude=None):
     """Return up to `limit` question ids from the chosen chapters.
 
-    order="adaptive" (default) is the science-backed path: due questions first
-    (most overdue first), then a capped number of never-seen questions, then
-    not-yet-due ones if room remains. "shuffle" and "ordered" are escape hatches
-    that ignore recall state.
+    order="adaptive" (default) is the science-backed path: due questions first,
+    then a capped number of never-seen questions, then not-yet-due ones if room
+    remains. Within each of those tiers the order is RANDOMISED, which spreads a
+    quiz across the selected chapters in proportion to each chapter's size (a
+    random sample favours bigger chapters) and stops the same questions leading
+    every time. "shuffle" and "ordered" are escape hatches that ignore recall state.
 
     `exclude` is a set/iterable of question ids to skip — used by endless mode to
     avoid re-serving questions already shown in the current session."""
@@ -158,13 +160,17 @@ def select_question_ids(conn, user_id, chapter_ids, limit, order="adaptive", exc
         if r["due_at"] is None:
             new.append(r["id"])
         elif r["due_at"] <= now:
-            due.append((r["due_at"], r["id"]))
+            due.append(r["id"])
         else:
-            future.append((r["due_at"], r["id"]))
-    due.sort()
-    future.sort()
+            future.append(r["id"])
+    # Randomise within each tier: a random sample across the pooled chapters is
+    # drawn in proportion to each chapter's question count, and the lead-off
+    # questions vary from quiz to quiz. Spaced-repetition priority is preserved at
+    # the tier level (all due before any new, new before not-yet-due).
+    random.shuffle(due)
     random.shuffle(new)
-    ordered = [i for _, i in due] + new[:NEW_CARDS_PER_SESSION] + [i for _, i in future]
+    random.shuffle(future)
+    ordered = due + new[:NEW_CARDS_PER_SESSION] + future
     return ordered[:limit]
 
 
