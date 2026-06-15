@@ -30,5 +30,14 @@
   {% block body %}{% endblock %}
 </main>
 <footer class="muted">FleetQuiz · family study · self-hosted</footer>
+<script>
+// Don't let a second action fire while one is still working: when any form inside
+// an action row submits, disable every button in that row (the submit itself still
+// goes through). Stops e.g. firing two tutor calls from the feedback screen.
+document.addEventListener('submit', function (e) {
+  var box = e.target.closest('.feedback-actions, .row-actions, .actions');
+  if (box) box.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+}, true);
+</script>
 </body>
 </html>

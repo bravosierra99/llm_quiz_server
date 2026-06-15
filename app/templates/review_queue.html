@@ -59,22 +59,4 @@
 <p class="muted">No proposals waiting. Flag a question or use "generate more like this" while quizzing.</p>
 {% endif %}
 
-<h2>Recent jobs</h2>
-{% if jobs %}
-<table class="data">
-  <tr><th>#</th><th>Kind</th><th>Status</th><th>Seed question</th><th>Result</th></tr>
-  {% for j in jobs %}
-  <tr>
-    <td class="muted">{{ j.id }}</td>
-    <td>{{ j.kind }}</td>
-    <td>{% if j.status == 'error' %}<span class="pill" style="color:var(--danger)">error</span>
-        {% elif j.status == 'done' %}done{% else %}<span class="muted">{{ j.status }}…</span>{% endif %}</td>
-    <td class="muted">{{ (j.qprompt or '')[:60] }}</td>
-    <td class="muted small">{{ j.message }}</td>
-  </tr>
-  {% endfor %}
-</table>
-{% else %}
-<p class="muted">No jobs yet.</p>
-{% endif %}
 {% endblock %}

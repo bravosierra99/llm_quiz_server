@@ -913,13 +913,17 @@ def tutor_start(request: Request, question_id: int, mode: str = Form("teach"),
                 "SELECT user_answer FROM answers WHERE session_id = ? AND question_id = ?",
                 (int(session_id), question_id)).fetchone()
             learner_answer = a["user_answer"] if a else None
-        history = [dict(r) for r in conn.execute(
-            "SELECT role, content FROM tutor_messages WHERE user_id = ? AND question_id = ? "
-            "ORDER BY id", (user["id"], question_id))]
-    block = _tutor_context_block(ctx, learner_answer)
-    reply = _tutor_call(block, history, intent)
-    with get_conn() as conn:
-        _store_tutor(conn, user["id"], question_id, intent, reply)
+        has_thread = conn.execute(
+            "SELECT 1 FROM tutor_messages WHERE user_id = ? AND question_id = ? LIMIT 1",
+            (user["id"], question_id)).fetchone() is not None
+    # If a thread already exists for this question, just open it — don't stack
+    # another canned intro (and don't fire a second model call). Follow-ups happen
+    # in the chat itself.
+    if not has_thread:
+        block = _tutor_context_block(ctx, learner_answer)
+        reply = _tutor_call(block, [], intent)
+        with get_conn() as conn:
+            _store_tutor(conn, user["id"], question_id, intent, reply)
     return RedirectResponse(_tutor_url(question_id, back), status_code=303)
 
 
@@ -1088,12 +1092,7 @@ def review(request: Request):
         for p in proposals:
             p["choices"] = jloads(p["choices"])
             p["cur_choices"] = jloads(p["cur_choices"]) if p["cur_choices"] else []
-        recent_jobs = [dict(r) for r in conn.execute("""
-            SELECT j.*, q.prompt AS qprompt
-            FROM jobs j LEFT JOIN questions q ON j.question_id = q.id
-            ORDER BY j.id DESC LIMIT 25
-        """)]
-    return render(request, "review_queue.html", proposals=proposals, jobs=recent_jobs)
+    return render(request, "review_queue.html", proposals=proposals)
 
 
 @app.post("/proposals/{pid}/approve")
