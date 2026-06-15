@@ -81,6 +81,8 @@ form { margin: 0; }
   border-radius: 999px; font-size: .75rem; font-weight: 600;
 }
 .mastery-mastered { background: rgba(46,160,67,.18); color: var(--good); border: 1px solid var(--good); }
+.mastery-partial  { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+/* legacy status values, retained so older rendered pages still style correctly */
 .mastery-review   { background: rgba(229,83,75,.15); color: #f0a868; border: 1px solid var(--danger); }
 .mastery-learning { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
 .mastery-new      { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
@@ -131,6 +133,10 @@ table.data th { color: var(--muted); font-weight: 600; font-size: .85rem; }
 .choice-option input { width: auto; margin: 0; }
 
 .subject-head { margin: 1rem 0 .3rem; color: var(--muted); font-size: 1rem; }
+.subject-head-row { display: flex; align-items: baseline; justify-content: space-between;
+  gap: 1rem; margin: 1rem 0 .3rem; border-bottom: 1px solid var(--border); }
+.subject-head-row .subject-head { margin: 0; }
+.subject-head-row .select-all { font-size: .85rem; color: var(--muted); }
 .chapter-pick { display: flex; align-items: center; gap: .5rem; padding: .3rem 0; }
 .chapter-pick.disabled { opacity: .45; }
 .check, .radio { display: inline-flex; align-items: center; gap: .5rem; }

@@ -105,29 +105,62 @@ def index(request: Request):
     user, redirect = require_user(request)
     if redirect:
         return redirect
-    with get_conn() as conn:
-        subjects = [dict(r) for r in conn.execute("""
-            SELECT s.*,
+    counts = """SELECT s.*,
                    (SELECT COUNT(*) FROM chapters c WHERE c.subject_id = s.id) AS chapter_count,
                    (SELECT COUNT(*) FROM questions q JOIN chapters c ON q.chapter_id = c.id
                       WHERE c.subject_id = s.id) AS question_count
-            FROM subjects s ORDER BY s.name
-        """)]
+            FROM subjects s"""
+    with get_conn() as conn:
+        # A user's library is the subjects they've added to their area; the rest
+        # are offered under "add to your area".
+        enrolled = [dict(r) for r in conn.execute(
+            counts + " JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = ?"
+            " ORDER BY s.name", (user["id"],))]
+        available = [dict(r) for r in conn.execute(
+            counts + " WHERE s.id NOT IN (SELECT subject_id FROM user_subjects WHERE user_id = ?)"
+            " ORDER BY s.name", (user["id"],))]
         recent = [dict(r) for r in conn.execute("""
             SELECT * FROM quiz_sessions WHERE user_id = ? AND finished_at IS NOT NULL
             ORDER BY finished_at DESC LIMIT 8
         """, (user["id"],))]
-    return render(request, "index.html", subjects=subjects, recent=recent)
+    return render(request, "index.html", subjects=enrolled, available=available, recent=recent)
 
 
 @app.post("/subjects")
 def create_subject(request: Request, name: str = Form(...), description: str = Form("")):
-    _, redirect = require_admin(request)
+    user, redirect = require_admin(request)
     if redirect:
         return redirect
     with get_conn() as conn:
-        conn.execute("INSERT INTO subjects (name, description) VALUES (?, ?)",
-                     (name.strip(), description.strip()))
+        cur = conn.execute("INSERT INTO subjects (name, description) VALUES (?, ?)",
+                           (name.strip(), description.strip()))
+        # The creator gets it in their own area straight away.
+        conn.execute("INSERT OR IGNORE INTO user_subjects (user_id, subject_id) VALUES (?, ?)",
+                     (user["id"], cur.lastrowid))
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/subjects/{subject_id}/enroll")
+def enroll_subject(request: Request, subject_id: int):
+    """Add a subject to the current user's learning area."""
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        conn.execute("INSERT OR IGNORE INTO user_subjects (user_id, subject_id) VALUES (?, ?)",
+                     (user["id"], subject_id))
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/subjects/{subject_id}/unenroll")
+def unenroll_subject(request: Request, subject_id: int):
+    """Remove a subject from the current user's learning area (content untouched)."""
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        conn.execute("DELETE FROM user_subjects WHERE user_id = ? AND subject_id = ?",
+                     (user["id"], subject_id))
     return RedirectResponse("/", status_code=303)
 
 
@@ -451,17 +484,24 @@ def quiz_setup(request: Request):
     if redirect:
         return redirect
     with get_conn() as conn:
-        subjects = [dict(r) for r in conn.execute("SELECT * FROM subjects ORDER BY name")]
-        chapters = [dict(r) for r in conn.execute("""
-            SELECT c.*, s.name AS subject_name,
-                   (SELECT COUNT(*) FROM questions q WHERE q.chapter_id = c.id) AS question_count
-            FROM chapters c JOIN subjects s ON c.subject_id = s.id
-            ORDER BY s.name, c.position, c.id
-        """)]
-        for c in chapters:
-            # Surface the mastery recommendation right where chapters are picked.
-            c["progress"] = scheduler.chapter_progress(conn, user["id"], c["id"])
-    return render(request, "quiz_setup.html", subjects=subjects, chapters=chapters)
+        # Only the user's enrolled subjects are quizzable; chapters are grouped
+        # under each so the page can offer a per-subject "select all".
+        subject_rows = conn.execute("""
+            SELECT s.id, s.name FROM subjects s
+            JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = ?
+            ORDER BY s.name
+        """, (user["id"],)).fetchall()
+        groups = []
+        for s in subject_rows:
+            chapters = [dict(r) for r in conn.execute("""
+                SELECT c.*, (SELECT COUNT(*) FROM questions q WHERE q.chapter_id = c.id) AS question_count
+                FROM chapters c WHERE c.subject_id = ? ORDER BY c.position, c.id
+            """, (s["id"],))]
+            for c in chapters:
+                # Surface the mastery count right where chapters are picked.
+                c["progress"] = scheduler.chapter_progress(conn, user["id"], c["id"])
+            groups.append({"id": s["id"], "name": s["name"], "chapters": chapters})
+    return render(request, "quiz_setup.html", subjects=groups)
 
 
 @app.post("/quiz/start")

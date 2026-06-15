@@ -5,21 +5,46 @@
   <a href="/quiz" class="btn primary">Take a quiz →</a>
 </div>
 
+<h2>Your subjects</h2>
 {% if subjects %}
 <div class="cards">
   {% for s in subjects %}
-  <a class="card link-card" href="/subjects/{{ s.id }}">
+  <div class="card">
+    <h3><a href="/subjects/{{ s.id }}">{{ s.name }}</a></h3>
+    {% if s.description %}<p class="muted">{{ s.description }}</p>{% endif %}
+    <p class="meta">{{ s.chapter_count }} chapter{{ '' if s.chapter_count == 1 else 's' }}
+       · {{ s.question_count }} question{{ '' if s.question_count == 1 else 's' }}</p>
+    <form method="post" action="/subjects/{{ s.id }}/unenroll">
+      <button type="submit" class="btn small">Remove from my area</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted">You haven't added any subjects yet.
+  {% if available %}Pick one from <strong>Add to your area</strong> below to start studying.
+  {% else %}Ask an admin to create a subject first.{% endif %}</p>
+{% endif %}
+
+{% if available %}
+<h2>Add to your area</h2>
+<p class="muted small">Add the subjects you want to study — they'll show up here and in your quizzes.</p>
+<div class="cards">
+  {% for s in available %}
+  <div class="card">
     <h3>{{ s.name }}</h3>
     {% if s.description %}<p class="muted">{{ s.description }}</p>{% endif %}
     <p class="meta">{{ s.chapter_count }} chapter{{ '' if s.chapter_count == 1 else 's' }}
        · {{ s.question_count }} question{{ '' if s.question_count == 1 else 's' }}</p>
-  </a>
+    <form method="post" action="/subjects/{{ s.id }}/enroll">
+      <button type="submit" class="btn primary small">+ Add to my area</button>
+    </form>
+  </div>
   {% endfor %}
 </div>
-{% else %}
-<p class="muted">No subjects yet. Create one below to get started.</p>
 {% endif %}
 
+{% if user and user.is_admin %}
 <div class="card">
   <h3>New subject</h3>
   <form method="post" action="/subjects" class="stack">
@@ -28,6 +53,7 @@
     <button type="submit" class="primary">Add subject</button>
   </form>
 </div>
+{% endif %}
 
 {% if recent %}
 <h2>Your recent quizzes</h2>

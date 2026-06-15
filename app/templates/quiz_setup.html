@@ -2,33 +2,37 @@
 {% block title %}Take a quiz · FleetQuiz{% endblock %}
 {% block body %}
 <h1>Take a quiz</h1>
-{% if chapters %}
+{% if subjects %}
 <form method="post" action="/quiz/start" class="stack card">
   <p>Pick one or more chapters to quiz on:</p>
-  <label class="check select-all">
-    <input type="checkbox" id="select-all" onclick="toggleAllChapters(this)">
-    <strong>Select all chapters</strong>
-  </label>
-  {% set current_subject = namespace(name=None) %}
-  {% for c in chapters %}
-    {% if c.subject_name != current_subject.name %}
-      {% set current_subject.name = c.subject_name %}
-      <h3 class="subject-head">{{ c.subject_name }}</h3>
-    {% endif %}
-    <label class="check chapter-pick {{ 'disabled' if c.question_count == 0 else '' }}">
-      <input type="checkbox" name="chapter_ids" value="{{ c.id }}"
-             {{ 'disabled' if c.question_count == 0 else '' }}>
-      {{ c.name }} <span class="muted">({{ c.question_count }} Q)</span>
-      {% if c.progress and c.progress.status not in ('empty',) %}
-        <span class="badge mastery-{{ c.progress.status }}">{{ c.progress.label }}</span>
-      {% endif %}
-    </label>
+
+  {% for s in subjects %}
+  <div class="subject-group">
+    <div class="subject-head-row">
+      <h3 class="subject-head">{{ s.name }}</h3>
+      <label class="check select-all">
+        <input type="checkbox" onclick="toggleSubject(this, {{ s.id }})">
+        Select all
+      </label>
+    </div>
+    {% for c in s.chapters %}
+      <label class="check chapter-pick {{ 'disabled' if c.question_count == 0 else '' }}">
+        <input type="checkbox" name="chapter_ids" value="{{ c.id }}" data-subject="{{ s.id }}"
+               {{ 'disabled' if c.question_count == 0 else '' }}>
+        {{ c.name }} <span class="muted">({{ c.question_count }} Q)</span>
+        {% if c.progress and c.progress.status not in ('empty',) %}
+          <span class="badge mastery-{{ c.progress.status }}">{{ c.progress.label }}</span>
+        {% endif %}
+      </label>
+    {% else %}
+      <p class="muted small">No chapters yet.</p>
+    {% endfor %}
+  </div>
   {% endfor %}
 
-  <p class="muted small">Badges: <strong>to review</strong> = questions due for
-    spaced-repetition review (includes ones you've missed) · <strong>learned</strong>
-    = answered enough to be on a long review interval · <strong>Mastered</strong> =
-    all learned and none currently due.</p>
+  <p class="muted small">The badge shows how many questions in a chapter you've
+    <strong>mastered</strong> — answered correctly enough times to reach a long
+    (21-day) spaced-repetition interval.</p>
 
   <div class="grid-3">
     <label>Number of questions
@@ -51,12 +55,13 @@
   <button type="submit" class="primary">Start quiz →</button>
 </form>
 <script>
-function toggleAllChapters(box) {
-  document.querySelectorAll('input[name="chapter_ids"]:not([disabled])')
+function toggleSubject(box, sid) {
+  document.querySelectorAll('input[name="chapter_ids"][data-subject="' + sid + '"]:not([disabled])')
     .forEach(cb => cb.checked = box.checked);
 }
 </script>
 {% else %}
-<p class="muted">No questions exist yet. <a href="/">Add some content first.</a></p>
+<p class="muted">You haven't added any subjects to your area yet.
+  <a href="/">Go to your Library</a> to add some.</p>
 {% endif %}
 {% endblock %}

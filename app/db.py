@@ -37,6 +37,17 @@ CREATE TABLE IF NOT EXISTS chapters (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Which subjects a user has added to their personal learning area. The library
+-- and quiz setup show only a user's enrolled subjects; everyone curates their
+-- own list (e.g. Arduino for one person, WSET for another). Pure UI scoping for
+-- this family LAN app — not a security boundary.
+CREATE TABLE IF NOT EXISTS user_subjects (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subject_id INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, subject_id)
+);
+
 -- Reference material a question can be traced back to: a pasted passage, an
 -- uploaded file (saved on the /data volume), or a URL. Provenance so the admin
 -- can verify/curate a question against where it came from.
@@ -159,6 +170,7 @@ CREATE TABLE IF NOT EXISTS proposals (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chapters_subject ON chapters(subject_id);
+CREATE INDEX IF NOT EXISTS idx_user_subjects_user ON user_subjects(user_id);
 CREATE INDEX IF NOT EXISTS idx_flags_question ON question_flags(question_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);

@@ -155,10 +155,15 @@ def select_question_ids(conn, user_id, chapter_ids, limit, order="adaptive", exc
 def chapter_progress(conn, user_id, chapter_id):
     """Per-user progress for one chapter, for the mastery badge.
 
-    Returns a dict with counts and a status one of:
-      empty | new | review | learning | mastered."""
+    A single, consistent signal: how many of the chapter's questions this user has
+    *mastered* — i.e. cleared the SM-2 bar (survived LEARNED_REPS recalls AND
+    reached the MASTERED_INTERVAL_DAYS interval). A mastered question that has
+    since come due still counts; "mastered" is about having learned it, not about
+    whether it's due right now. Label is always "<mastered>/<total> mastered".
+
+    Returns a dict with counts and a status one of: empty | partial | mastered."""
     rows = conn.execute(
-        """SELECT r.reps AS reps, r.interval_days AS interval_days, r.due_at AS due_at
+        """SELECT r.reps AS reps, r.interval_days AS interval_days
            FROM questions q
            LEFT JOIN review_state r ON r.question_id = q.id AND r.user_id = ?
            WHERE q.chapter_id = ?""",
@@ -166,27 +171,16 @@ def chapter_progress(conn, user_id, chapter_id):
     ).fetchall()
     total = len(rows)
     if total == 0:
-        return {"total": 0, "seen": 0, "learned": 0, "due": 0,
-                "status": "empty", "label": ""}
+        return {"total": 0, "seen": 0, "mastered": 0, "status": "empty", "label": ""}
 
-    now = _fmt(_now())
-    seen = learned = due = 0
+    seen = mastered = 0
     for r in rows:
         if r["reps"] is None:
             continue  # never attempted by this user
         seen += 1
-        if r["due_at"] and r["due_at"] <= now:
-            due += 1
         if r["reps"] >= LEARNED_REPS and (r["interval_days"] or 0) >= MASTERED_INTERVAL_DAYS:
-            learned += 1
+            mastered += 1
 
-    if learned == total and due == 0:
-        status, label = "mastered", "Mastered ✓"
-    elif due > 0:
-        status, label = "review", f"{due} to review"
-    elif seen == 0:
-        status, label = "new", "Not started"
-    else:
-        status, label = "learning", f"{learned}/{total} learned"
-    return {"total": total, "seen": seen, "learned": learned, "due": due,
-            "status": status, "label": label}
+    status = "mastered" if mastered == total else "partial"
+    return {"total": total, "seen": seen, "mastered": mastered,
+            "status": status, "label": f"{mastered}/{total} mastered"}
