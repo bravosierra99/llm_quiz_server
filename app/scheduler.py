@@ -94,15 +94,19 @@ def grade(conn, user_id, question_id, correct):
 # --------------------------------------------------------------------------
 # Selection
 # --------------------------------------------------------------------------
-def select_question_ids(conn, user_id, chapter_ids, limit, order="adaptive"):
+def select_question_ids(conn, user_id, chapter_ids, limit, order="adaptive", exclude=None):
     """Return up to `limit` question ids from the chosen chapters.
 
     order="adaptive" (default) is the science-backed path: due questions first
     (most overdue first), then a capped number of never-seen questions, then
     not-yet-due ones if room remains. "shuffle" and "ordered" are escape hatches
-    that ignore recall state."""
+    that ignore recall state.
+
+    `exclude` is a set/iterable of question ids to skip — used by endless mode to
+    avoid re-serving questions already shown in the current session."""
     if not chapter_ids:
         return []
+    exclude = set(exclude or ())
     ph = ",".join("?" for _ in chapter_ids)
 
     if order == "ordered":
@@ -130,6 +134,8 @@ def select_question_ids(conn, user_id, chapter_ids, limit, order="adaptive"):
     now = _fmt(_now())
     due, new, future = [], [], []
     for r in rows:
+        if r["id"] in exclude:
+            continue
         if r["due_at"] is None:
             new.append(r["id"])
         elif r["due_at"] <= now:

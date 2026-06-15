@@ -12,9 +12,14 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import ai, auth, scheduler, sources
+from . import ai, auth, importer, scheduler, sources
 from .db import get_conn, init_db, jloads
 from .importer import import_bank_data
+
+
+def _safe_back(path):
+    """Only allow same-site redirect targets from form fields (no open redirect)."""
+    return path if path.startswith("/") and not path.startswith("//") else "/"
 
 BASE_DIR = os.path.dirname(__file__)
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -459,24 +464,30 @@ def quiz_setup(request: Request):
 
 @app.post("/quiz/start")
 def quiz_start(request: Request, chapter_ids: list[int] = Form(default=[]),
-               num_questions: int = Form(10), order: str = Form("adaptive")):
+               num_questions: int = Form(10), order: str = Form("adaptive"),
+               endless: str = Form("")):
     user, redirect = require_user(request)
     if redirect:
         return redirect
     if not chapter_ids:
         return RedirectResponse("/quiz", status_code=303)
+    is_endless = endless == "on"
     placeholders = ",".join("?" for _ in chapter_ids)
     with get_conn() as conn:
-        # Adaptive (default) selection: due > new > not-yet-due. See scheduler.
-        qids = scheduler.select_question_ids(conn, user["id"], chapter_ids, num_questions, order)
+        # Endless seeds just the first question; the queue grows on each answer
+        # (see quiz_answer). Fixed-length seeds the whole adaptive batch.
+        seed_n = 1 if is_endless else num_questions
+        qids = scheduler.select_question_ids(conn, user["id"], chapter_ids, seed_n, order)
         if not qids:
             return RedirectResponse("/quiz", status_code=303)
         names = conn.execute(
             f"SELECT name FROM chapters WHERE id IN ({placeholders})", chapter_ids).fetchall()
         label = ", ".join(n["name"] for n in names)
+        if is_endless:
+            label += " · endless"
         cur = conn.execute(
-            "INSERT INTO quiz_sessions (user_id, chapter_ids, label, total) VALUES (?, ?, ?, ?)",
-            (user["id"], json.dumps(chapter_ids), label, len(qids)),
+            "INSERT INTO quiz_sessions (user_id, chapter_ids, label, total, endless) VALUES (?, ?, ?, ?, ?)",
+            (user["id"], json.dumps(chapter_ids), label, len(qids), 1 if is_endless else 0),
         )
         session_id = cur.lastrowid
         # The queue lives in session_questions — NOT in answers — so an abandoned
@@ -503,6 +514,8 @@ def quiz_question(request: Request, session_id: int, idx: int):
         session = conn.execute("SELECT * FROM quiz_sessions WHERE id = ?", (session_id,)).fetchone()
         if not session:
             return RedirectResponse("/quiz", status_code=303)
+        if session["finished_at"]:
+            return RedirectResponse(f"/quiz/{session_id}/results", status_code=303)
         qids = _session_question_ids(conn, session_id)
         if idx >= len(qids):
             return RedirectResponse(f"/quiz/{session_id}/results", status_code=303)
@@ -551,7 +564,50 @@ def quiz_answer(request: Request, session_id: int, idx: int,
             # Grade the SESSION OWNER (profiles are switchable on the bare LAN),
             # once, on this first attempt.
             scheduler.grade(conn, session["user_id"], q["id"], bool(is_correct))
-    return RedirectResponse(f"/quiz/{session_id}/q/{idx + 1}", status_code=303)
+        # Endless: once the last queued question is answered, append the next
+        # adaptive question (excluding ones already served this session). When the
+        # pool is exhausted, nothing is appended and "Next" leads to results.
+        # The append lives here in the POST so GET stays read-only.
+        if session["endless"] and not session["finished_at"] and idx == len(qids) - 1:
+            nxt = scheduler.select_question_ids(
+                conn, session["user_id"], jloads(session["chapter_ids"]), 1, "adaptive",
+                exclude=set(qids))
+            if nxt:
+                conn.execute(
+                    "INSERT INTO session_questions (session_id, position, question_id) VALUES (?, ?, ?)",
+                    (session_id, len(qids), nxt[0]))
+    # PRG: redirect to the feedback screen (survives refresh, shows right/wrong).
+    return RedirectResponse(f"/quiz/{session_id}/f/{idx}", status_code=303)
+
+
+@app.get("/quiz/{session_id}/f/{idx}", response_class=HTMLResponse)
+def quiz_feedback(request: Request, session_id: int, idx: int):
+    """On-the-spot feedback after answering: right/wrong, the correct answer and
+    explanation, plus flag / generate-more / next / end-quiz actions."""
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        session = conn.execute("SELECT * FROM quiz_sessions WHERE id = ?", (session_id,)).fetchone()
+        if not session:
+            return RedirectResponse("/quiz", status_code=303)
+        qids = _session_question_ids(conn, session_id)
+        if idx >= len(qids):
+            return RedirectResponse(f"/quiz/{session_id}/results", status_code=303)
+        qid = qids[idx]
+        q = dict(conn.execute("SELECT * FROM questions WHERE id = ?", (qid,)).fetchone())
+        ans = conn.execute(
+            "SELECT * FROM answers WHERE session_id = ? AND question_id = ?",
+            (session_id, qid)).fetchone()
+        flagged = conn.execute(
+            "SELECT 1 FROM question_flags WHERE question_id = ? AND user_id = ? AND resolved_at IS NULL",
+            (qid, user["id"])).fetchone() is not None
+    q["choices"] = jloads(q["choices"])
+    return render(request, "quiz_feedback.html", session=dict(session), q=q,
+                  answer=dict(ans) if ans else None, idx=idx, total=len(qids),
+                  has_next=(idx + 1) < len(qids), flagged=flagged,
+                  is_admin=bool(user.get("is_admin")),
+                  added=request.query_params.get("added"))
 
 
 @app.get("/quiz/{session_id}/results", response_class=HTMLResponse)
@@ -572,14 +628,23 @@ def quiz_results(request: Request, session_id: int):
             LEFT JOIN answers a ON a.session_id = sq.session_id AND a.question_id = sq.question_id
             WHERE sq.session_id = ? ORDER BY sq.position
         """, (session_id,))]
-        correct = sum(1 for r in rows if r["is_correct"])
-        conn.execute("UPDATE quiz_sessions SET correct = ?, finished_at = datetime('now') WHERE id = ?",
-                     (correct, session_id))
+        answered = [r for r in rows if r["answered"]]
+        correct = sum(1 for r in answered if r["is_correct"])
+        # Score on what was actually answered, so ending early / skipping doesn't
+        # drag the percentage. Unanswered questions still appear in the review.
+        conn.execute("UPDATE quiz_sessions SET correct = ?, total = ?, finished_at = datetime('now') WHERE id = ?",
+                     (correct, len(answered), session_id))
     for r in rows:
         r["choices"] = jloads(r["choices"])
+    # Sort wrong-first: answered-incorrect, then answered-correct, then unanswered.
+    # Python's sort is stable, so position order is preserved within each group.
+    rows.sort(key=lambda r: (2 if not r["answered"] else (0 if not r["is_correct"] else 1)))
     missed_ids = [r["question_id"] for r in rows if r["answered"] and not r["is_correct"]]
+    unanswered = sum(1 for r in rows if not r["answered"])
     return render(request, "results.html", session=dict(session), rows=rows,
-                  correct=correct, total=len(rows), missed_ids=missed_ids)
+                  correct=correct, total=len(answered), unanswered=unanswered,
+                  missed_ids=missed_ids, is_admin=bool(user.get("is_admin")),
+                  added=request.query_params.get("added"))
 
 
 @app.post("/quiz/retry-missed")
@@ -600,6 +665,81 @@ def quiz_retry_missed(request: Request, question_ids: str = Form(...), label: st
                 "INSERT INTO session_questions (session_id, position, question_id) VALUES (?, ?, ?)",
                 (session_id, pos, qid))
     return RedirectResponse(f"/quiz/{session_id}/q/0", status_code=303)
+
+
+# --------------------------------------------------------------------------
+# Per-question actions: flag for review  +  generate more like this
+# --------------------------------------------------------------------------
+@app.post("/questions/{question_id}/flag")
+def flag_question(request: Request, question_id: int,
+                  back: str = Form("/"), note: str = Form("")):
+    """Any signed-in user can flag a question for review (one active flag per
+    person per question). Surfaced to the admin in Analytics."""
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO question_flags (question_id, user_id, note) VALUES (?, ?, ?)
+               ON CONFLICT(question_id, user_id) DO UPDATE SET
+                   resolved_at = NULL, created_at = datetime('now'), note = excluded.note""",
+            (question_id, user["id"], note.strip()))
+    return RedirectResponse(_safe_back(back), status_code=303)
+
+
+@app.post("/questions/{question_id}/flag/resolve")
+def resolve_flag(request: Request, question_id: int):
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE question_flags SET resolved_at = datetime('now') "
+            "WHERE question_id = ? AND resolved_at IS NULL", (question_id,))
+    return RedirectResponse("/analytics", status_code=303)
+
+
+@app.post("/questions/{question_id}/generate-more")
+def generate_more(request: Request, question_id: int, back: str = Form("/")):
+    """Admin-only: seed the LLM from one question and add ~5 similar ones to the
+    same chapter (and source). Synchronous — the local model takes ~1-2 min.
+    New questions are deduped by prompt and curated later via the chapter view."""
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        q = conn.execute("SELECT * FROM questions WHERE id = ?", (question_id,)).fetchone()
+        if not q:
+            return RedirectResponse(_safe_back(back), status_code=303)
+        q = dict(q)
+        chapter = conn.execute("SELECT * FROM chapters WHERE id = ?", (q["chapter_id"],)).fetchone()
+        src = sources.get(conn, q["source_id"]) if q["source_id"] else None
+
+    topic = (f"Chapter: {chapter['name']}. Write more questions in the same style and "
+             f"difficulty as this one, on closely related material (do NOT duplicate it): "
+             f"\"{q['prompt']}\"")
+    src_text = sources.text_for_generation(src) if src else ""
+    result = ai.generate_questions("source" if src_text else "topic", topic, src_text,
+                                   5, "medium", [q["type"]])
+    added = 0
+    if result["ok"]:
+        with get_conn() as conn:
+            existing = {r["prompt"] for r in conn.execute(
+                "SELECT prompt FROM questions WHERE chapter_id = ?", (q["chapter_id"],))}
+            for raw in result["questions"]:
+                norm, _reason = importer._normalise(raw)
+                if not norm or norm["prompt"] in existing:
+                    continue
+                conn.execute(
+                    """INSERT INTO questions (chapter_id, type, prompt, choices, answer, explanation, source_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (q["chapter_id"], norm["type"], norm["prompt"], json.dumps(norm["choices"]),
+                     norm["answer"], norm["explanation"], q["source_id"]))
+                existing.add(norm["prompt"])
+                added += 1
+    dest = _safe_back(back)
+    sep = "&" if "?" in dest else "?"
+    return RedirectResponse(f"{dest}{sep}added={added}", status_code=303)
 
 
 @app.get("/history", response_class=HTMLResponse)
@@ -662,6 +802,21 @@ def _question_stats(conn):
     return subjects, weak
 
 
+def _flagged_questions(conn):
+    """Questions with at least one unresolved user flag, for admin review."""
+    return [dict(r) for r in conn.execute("""
+        SELECT q.id AS qid, q.prompt, q.type, c.name AS chapter,
+               COUNT(f.id) AS flags,
+               GROUP_CONCAT(NULLIF(f.note, ''), ' · ') AS notes
+        FROM question_flags f
+        JOIN questions q ON f.question_id = q.id
+        JOIN chapters c ON q.chapter_id = c.id
+        WHERE f.resolved_at IS NULL
+        GROUP BY q.id
+        ORDER BY flags DESC, q.id
+    """)]
+
+
 @app.get("/analytics", response_class=HTMLResponse)
 def analytics(request: Request):
     _, redirect = require_admin(request)
@@ -669,7 +824,9 @@ def analytics(request: Request):
         return redirect
     with get_conn() as conn:
         subjects, weak = _question_stats(conn)
-    return render(request, "analytics.html", subjects=subjects, weak=weak, ai_review=None)
+        flagged = _flagged_questions(conn)
+    return render(request, "analytics.html", subjects=subjects, weak=weak,
+                  flagged=flagged, ai_review=None)
 
 
 @app.post("/analytics/ai-review", response_class=HTMLResponse)
@@ -683,8 +840,10 @@ def analytics_ai_review(request: Request):
         return redirect
     with get_conn() as conn:
         subjects, weak = _question_stats(conn)
+        flagged = _flagged_questions(conn)
     ai_review = ai.review_results(weak)
-    return render(request, "analytics.html", subjects=subjects, weak=weak, ai_review=ai_review)
+    return render(request, "analytics.html", subjects=subjects, weak=weak,
+                  flagged=flagged, ai_review=ai_review)
 
 
 # --------------------------------------------------------------------------

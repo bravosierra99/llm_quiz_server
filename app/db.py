@@ -111,7 +111,21 @@ CREATE TABLE IF NOT EXISTS review_state (
     PRIMARY KEY (user_id, question_id)
 );
 
+-- A user can flag a question for review (confusing, looks wrong, etc.). One
+-- active flag per (question, user); resolving sets resolved_at. Surfaced to the
+-- admin in Analytics.
+CREATE TABLE IF NOT EXISTS question_flags (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    note        TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT,
+    UNIQUE (question_id, user_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_chapters_subject ON chapters(subject_id);
+CREATE INDEX IF NOT EXISTS idx_flags_question ON question_flags(question_id);
 CREATE INDEX IF NOT EXISTS idx_questions_chapter ON questions(chapter_id);
 CREATE INDEX IF NOT EXISTS idx_answers_session ON answers(session_id);
 CREATE INDEX IF NOT EXISTS idx_answers_question ON answers(question_id);
@@ -128,6 +142,8 @@ def init_db():
         _migrate_legacy_queue(conn)
         _add_column_if_missing(conn, "questions", "source_id",
                                "INTEGER REFERENCES sources(id) ON DELETE SET NULL")
+        _add_column_if_missing(conn, "quiz_sessions", "endless",
+                               "INTEGER NOT NULL DEFAULT 0")
 
 
 def _add_column_if_missing(conn, table, column, decl):

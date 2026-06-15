@@ -90,6 +90,10 @@ form { margin: 0; }
   border: 1px solid var(--border); border-radius: 8px; padding: .8rem 1rem; margin: 0;
 }
 
+.row-actions, .feedback-actions { flex-wrap: wrap; gap: .5rem; margin-top: .7rem; }
+.feedback-actions { margin-top: 1.1rem; }
+.end-quiz { margin-top: 1rem; }
+
 table.data { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 table.data th, table.data td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--border); }
 table.data th { color: var(--muted); font-weight: 600; font-size: .85rem; }

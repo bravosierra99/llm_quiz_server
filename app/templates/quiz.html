@@ -1,8 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Quiz · {{ idx + 1 }}/{{ total }}{% endblock %}
 {% block body %}
+{% if not session.endless %}
 <div class="progress"><div class="bar" style="width: {{ (idx / total * 100)|round(0, 'floor') }}%"></div></div>
 <p class="muted">Question {{ idx + 1 }} of {{ total }} · {{ session.label }}</p>
+{% else %}
+<p class="muted">Question {{ idx + 1 }} · ∞ endless · {{ session.label }}</p>
+{% endif %}
 
 <div class="card quiz-card">
   <span class="pill type-{{ q.type }}">{{ q.type }}</span>
@@ -48,4 +52,8 @@
   </script>
   {% endif %}
 </div>
+
+<p class="muted end-quiz">
+  <a href="/quiz/{{ session.id }}/results" onclick="return confirm('End the quiz and see results?')">End quiz</a>
+</p>
 {% endblock %}

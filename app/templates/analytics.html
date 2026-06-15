@@ -43,6 +43,32 @@ already uses each person's recall to decide what to show next — this page is f
 </div>
 {% endif %}
 
+<div class="card">
+  <h2>🚩 Flagged for review</h2>
+  <p class="muted">Questions someone flagged while quizzing. Resolve to clear.</p>
+  {% if flagged %}
+  <table class="data">
+    <tr><th>Chapter</th><th>Question</th><th>Type</th><th>Flags</th><th></th></tr>
+    {% for q in flagged %}
+    <tr>
+      <td class="muted">{{ q.chapter }}</td>
+      <td><a href="/questions/{{ q.qid }}/edit">{{ q.prompt }}</a>
+        {% if q.notes %}<br><span class="muted small">{{ q.notes }}</span>{% endif %}</td>
+      <td><span class="pill type-{{ q.type }}">{{ q.type }}</span></td>
+      <td><strong>{{ q.flags }}</strong></td>
+      <td>
+        <form method="post" action="/questions/{{ q.qid }}/flag/resolve">
+          <button type="submit" class="btn small">Resolve</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No open flags.</p>
+  {% endif %}
+</div>
+
 <h2>All questions by chapter</h2>
 {% for s in subjects %}
 <h3 class="subject-head">{{ s.name }}</h3>

@@ -8,6 +8,11 @@
   <span>{{ pct }}%</span>
   <span class="muted">{{ session.label }}</span>
 </div>
+{% if unanswered %}<p class="muted">{{ unanswered }} not answered.</p>{% endif %}
+
+{% if added is not none %}
+<p class="flash">Added {{ added }} new question(s) to the chapter.</p>
+{% endif %}
 
 {% if missed_ids %}
 <form method="post" action="/quiz/retry-missed">
@@ -15,25 +20,42 @@
   <input type="hidden" name="label" value="{{ session.label }}">
   <button type="submit" class="btn primary">↻ Retry the {{ missed_ids|length }} you missed</button>
 </form>
-{% else %}
+{% elif total %}
 <p class="flash">Perfect score! 🎉</p>
 {% endif %}
 
-<h2>Review</h2>
+<h2>Review <span class="muted">(missed first)</span></h2>
 {% for r in rows %}
-<div class="card result-row {{ 'correct-row' if r.is_correct else 'wrong-row' }}">
+<div class="card result-row {{ 'correct-row' if r.answered and r.is_correct else ('wrong-row' if r.answered else '') }}">
   <div class="row-between">
     <span class="pill type-{{ r.type }}">{{ r.type }}</span>
-    <span>{{ '✓' if r.is_correct else '✗' }}</span>
+    <span>{{ '✓' if (r.answered and r.is_correct) else ('✗' if r.answered else '—') }}</span>
   </div>
   <p class="prompt">{{ r.prompt }}</p>
-  {% if not r.is_correct %}
+  {% if not r.answered %}
+    <p class="muted">Not answered.</p>
+    <p class="answer"><strong>Answer:</strong> {{ r.answer }}</p>
+  {% elif not r.is_correct %}
     {% if r.user_answer %}<p class="muted">You answered: {{ r.user_answer }}</p>{% endif %}
     <p class="answer"><strong>Correct:</strong> {{ r.answer }}</p>
   {% else %}
     <p class="answer"><strong>Answer:</strong> {{ r.answer }}</p>
   {% endif %}
   {% if r.explanation %}<p class="muted explanation">{{ r.explanation }}</p>{% endif %}
+
+  <div class="actions row-actions">
+    <form method="post" action="/questions/{{ r.question_id }}/flag">
+      <input type="hidden" name="back" value="/quiz/{{ session.id }}/results">
+      <button type="submit" class="btn small">🚩 Flag for review</button>
+    </form>
+    {% if is_admin %}
+    <form method="post" action="/questions/{{ r.question_id }}/generate-more"
+          onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Generating…';">
+      <input type="hidden" name="back" value="/quiz/{{ session.id }}/results">
+      <button type="submit" class="btn small">✨ Generate more like this</button>
+    </form>
+    {% endif %}
+  </div>
 </div>
 {% endfor %}
 

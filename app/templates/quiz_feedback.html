@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Correct' if answer and answer.is_correct else 'Review' }} · FleetQuiz{% endblock %}
+{% block body %}
+{% set correct = answer and answer.is_correct %}
+{% set back = '/quiz/' ~ session.id ~ '/f/' ~ idx %}
+
+<div class="score-banner {{ 'good' if correct else 'low' }}">
+  <span class="big">{{ '✓ Correct' if correct else '✗ Incorrect' }}</span>
+  <span class="muted">{% if not session.endless %}Question {{ idx + 1 }} of {{ total }}{% else %}Question {{ idx + 1 }} · ∞ endless{% endif %}</span>
+</div>
+
+{% if added is not none %}
+<p class="flash">Added {{ added }} new question(s) to this chapter.</p>
+{% endif %}
+
+<div class="card result-row {{ 'correct-row' if correct else 'wrong-row' }}">
+  <span class="pill type-{{ q.type }}">{{ q.type }}</span>
+  <p class="prompt">{{ q.prompt }}</p>
+  {% if answer and answer.user_answer %}
+    <p class="muted">You answered: {{ answer.user_answer }}</p>
+  {% endif %}
+  <p class="answer"><strong>{{ 'Answer' if correct else 'Correct answer' }}:</strong> {{ q.answer }}</p>
+  {% if q.explanation %}<p class="muted explanation">{{ q.explanation }}</p>{% endif %}
+</div>
+
+<div class="actions feedback-actions">
+  {% if has_next %}
+    <a class="btn primary" href="/quiz/{{ session.id }}/q/{{ idx + 1 }}">Next →</a>
+  {% else %}
+    <a class="btn primary" href="/quiz/{{ session.id }}/results">See results →</a>
+  {% endif %}
+
+  <form method="post" action="/questions/{{ q.id }}/flag">
+    <input type="hidden" name="back" value="{{ back }}">
+    <button type="submit" class="btn" {{ 'disabled' if flagged else '' }}>
+      {{ '🚩 Flagged' if flagged else '🚩 Flag for review' }}
+    </button>
+  </form>
+
+  {% if is_admin %}
+  <form method="post" action="/questions/{{ q.id }}/generate-more"
+        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Generating… (~1–2 min)';">
+    <input type="hidden" name="back" value="{{ back }}">
+    <button type="submit" class="btn">✨ Generate more like this</button>
+  </form>
+  {% endif %}
+
+  <a class="btn" href="/quiz/{{ session.id }}/results">End quiz</a>
+</div>
+{% endblock %}
