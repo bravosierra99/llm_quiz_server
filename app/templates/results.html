@@ -10,8 +10,14 @@
 </div>
 {% if unanswered %}<p class="muted">{{ unanswered }} not answered.</p>{% endif %}
 
-{% if added is not none %}
-<p class="flash">Added {{ added }} new question(s) to the chapter.</p>
+{% if queued %}
+<p class="flash">Generating in the background — check the Review page shortly.</p>
+{% endif %}
+{% if is_admin and (pending_review or active_jobs) %}
+<p class="flash">
+  {% if pending_review %}<a href="/review"><strong>{{ pending_review }}</strong> proposal(s) to review</a>{% endif %}
+  {% if active_jobs %}{% if pending_review %} · {% endif %}{{ active_jobs }} job(s) still running{% endif %}
+</p>
 {% endif %}
 
 {% if missed_ids %}

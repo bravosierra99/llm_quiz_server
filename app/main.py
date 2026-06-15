@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import ai, auth, importer, scheduler, sources
+from . import ai, auth, importer, jobs, scheduler, sources
 from .db import get_conn, init_db, jloads
 from .importer import import_bank_data
 
@@ -32,6 +32,7 @@ app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), na
 @app.on_event("startup")
 def _startup():
     init_db()
+    jobs.start_worker()
 
 
 def render(request, template, **ctx):
@@ -613,7 +614,7 @@ def quiz_feedback(request: Request, session_id: int, idx: int):
                   answer=dict(ans) if ans else None, idx=idx, total=len(qids),
                   has_next=(idx + 1) < len(qids), flagged=flagged,
                   is_admin=bool(user.get("is_admin")),
-                  added=request.query_params.get("added"))
+                  queued=request.query_params.get("queued"))
 
 
 @app.get("/quiz/{session_id}/results", response_class=HTMLResponse)
@@ -647,14 +648,20 @@ def quiz_results(request: Request, session_id: int):
     rows.sort(key=lambda r: (2 if not r["answered"] else (0 if not r["is_correct"] else 1)))
     missed_ids = [r["question_id"] for r in rows if r["answered"] and not r["is_correct"]]
     unanswered = sum(1 for r in rows if not r["answered"])
+    is_admin = bool(user.get("is_admin"))
     with get_conn() as conn:
         flagged_ids = {r["question_id"] for r in conn.execute(
             "SELECT question_id FROM question_flags WHERE user_id = ? AND resolved_at IS NULL",
             (user["id"],))}
+        pending_review = conn.execute(
+            "SELECT COUNT(*) n FROM proposals WHERE status = 'pending'").fetchone()["n"] if is_admin else 0
+        active_jobs = conn.execute(
+            "SELECT COUNT(*) n FROM jobs WHERE status IN ('pending','running')").fetchone()["n"] if is_admin else 0
     return render(request, "results.html", session=dict(session), rows=rows,
                   correct=correct, total=len(answered), unanswered=unanswered,
-                  missed_ids=missed_ids, is_admin=bool(user.get("is_admin")),
-                  flagged_ids=flagged_ids, added=request.query_params.get("added"))
+                  missed_ids=missed_ids, is_admin=is_admin, flagged_ids=flagged_ids,
+                  pending_review=pending_review, active_jobs=active_jobs,
+                  queued=request.query_params.get("queued"))
 
 
 @app.post("/quiz/retry-missed")
@@ -696,12 +703,17 @@ def flag_question(request: Request, question_id: int,
         if active:
             conn.execute("UPDATE question_flags SET resolved_at = datetime('now') WHERE id = ?",
                          (active["id"],))
+            flagged_on = False
         else:
             conn.execute(
                 """INSERT INTO question_flags (question_id, user_id, note) VALUES (?, ?, ?)
                    ON CONFLICT(question_id, user_id) DO UPDATE SET
                        resolved_at = NULL, created_at = datetime('now'), note = excluded.note""",
                 (question_id, user["id"], note.strip()))
+            flagged_on = True
+    if flagged_on:
+        # Kick off a background "verify & propose a fix" pass (deduped per question).
+        jobs.enqueue("flag_fix", user["id"], question_id)
     return RedirectResponse(_safe_back(back), status_code=303)
 
 
@@ -719,53 +731,16 @@ def resolve_flag(request: Request, question_id: int):
 
 @app.post("/questions/{question_id}/generate-more")
 def generate_more(request: Request, question_id: int, back: str = Form("/")):
-    """Admin-only: seed the LLM from one question and add ~5 similar ones to the
-    same chapter (and source). Synchronous — the local model takes ~1-2 min.
-    New questions are deduped by prompt and curated later via the chapter view."""
-    _, redirect = require_admin(request)
+    """Admin-only: queue a background job that seeds the LLM (with web search +
+    the chapter's knowledge base) from this question and PROPOSES ~5 similar ones.
+    Non-blocking — keep quizzing; approve the proposals on the Review page."""
+    user, redirect = require_admin(request)
     if redirect:
         return redirect
-    with get_conn() as conn:
-        q = conn.execute("SELECT * FROM questions WHERE id = ?", (question_id,)).fetchone()
-        if not q:
-            return RedirectResponse(_safe_back(back), status_code=303)
-        q = dict(q)
-        chapter = conn.execute("SELECT * FROM chapters WHERE id = ?", (q["chapter_id"],)).fetchone()
-        subject = conn.execute(
-            "SELECT s.* FROM subjects s JOIN chapters c ON c.subject_id = s.id WHERE c.id = ?",
-            (q["chapter_id"],)).fetchone()
-        src = sources.get(conn, q["source_id"]) if q["source_id"] else None
-
-    # Give the model the full picture: the library/subject and its stated goal,
-    # the chapter, the seed question, and (below) the chapter's knowledge base.
-    ctx = f"Subject/library: {subject['name']}."
-    if subject["description"]:
-        ctx += f" The point of this subject: {subject['description']}."
-    topic = (f"{ctx} Chapter: {chapter['name']}. Write more questions in the same style and "
-             f"difficulty as this one, on closely related material from this chapter "
-             f"(do NOT duplicate it): \"{q['prompt']}\"")
-    src_text = sources.text_for_generation(src) if src else ""
-    result = ai.generate_questions("source" if src_text else "topic", topic, src_text,
-                                   5, "medium", [q["type"]])
-    added = 0
-    if result["ok"]:
-        with get_conn() as conn:
-            existing = {r["prompt"] for r in conn.execute(
-                "SELECT prompt FROM questions WHERE chapter_id = ?", (q["chapter_id"],))}
-            for raw in result["questions"]:
-                norm, _reason = importer._normalise(raw)
-                if not norm or norm["prompt"] in existing:
-                    continue
-                conn.execute(
-                    """INSERT INTO questions (chapter_id, type, prompt, choices, answer, explanation, source_id)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (q["chapter_id"], norm["type"], norm["prompt"], json.dumps(norm["choices"]),
-                     norm["answer"], norm["explanation"], q["source_id"]))
-                existing.add(norm["prompt"])
-                added += 1
+    jobs.enqueue("generate_more", user["id"], question_id)
     dest = _safe_back(back)
     sep = "&" if "?" in dest else "?"
-    return RedirectResponse(f"{dest}{sep}added={added}", status_code=303)
+    return RedirectResponse(f"{dest}{sep}queued=1", status_code=303)
 
 
 @app.get("/history", response_class=HTMLResponse)
@@ -870,6 +845,81 @@ def analytics_ai_review(request: Request):
     ai_review = ai.review_results(weak)
     return render(request, "analytics.html", subjects=subjects, weak=weak,
                   flagged=flagged, ai_review=ai_review)
+
+
+# --------------------------------------------------------------------------
+# Review queue (admin) — approve/reject LLM proposals (generate-more, flag-fix)
+# --------------------------------------------------------------------------
+@app.get("/review", response_class=HTMLResponse)
+def review(request: Request):
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        proposals = [dict(r) for r in conn.execute("""
+            SELECT p.*, c.name AS chapter_name, j.kind AS job_kind,
+                   q.prompt AS cur_prompt, q.choices AS cur_choices, q.answer AS cur_answer,
+                   q.explanation AS cur_explanation, q.type AS cur_type
+            FROM proposals p
+            JOIN chapters c ON p.chapter_id = c.id
+            LEFT JOIN jobs j ON p.job_id = j.id
+            LEFT JOIN questions q ON p.question_id = q.id
+            WHERE p.status = 'pending'
+            ORDER BY p.created_at, p.id
+        """)]
+        for p in proposals:
+            p["choices"] = jloads(p["choices"])
+            p["cur_choices"] = jloads(p["cur_choices"]) if p["cur_choices"] else []
+        recent_jobs = [dict(r) for r in conn.execute("""
+            SELECT j.*, q.prompt AS qprompt
+            FROM jobs j LEFT JOIN questions q ON j.question_id = q.id
+            ORDER BY j.id DESC LIMIT 25
+        """)]
+    return render(request, "review_queue.html", proposals=proposals, jobs=recent_jobs)
+
+
+@app.post("/proposals/{pid}/approve")
+def approve_proposal(request: Request, pid: int):
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        p = conn.execute("SELECT * FROM proposals WHERE id = ? AND status = 'pending'", (pid,)).fetchone()
+        if not p:
+            return RedirectResponse("/review", status_code=303)
+        p = dict(p)
+        # Re-validate the proposal like any untrusted generated question.
+        norm, _reason = importer._normalise({
+            "type": p["type"], "prompt": p["prompt"], "choices": jloads(p["choices"]),
+            "answer": p["answer"], "explanation": p["explanation"]})
+        if not norm:
+            conn.execute("UPDATE proposals SET status = 'rejected' WHERE id = ?", (pid,))
+            return RedirectResponse("/review", status_code=303)
+        if p["kind"] == "add":
+            conn.execute(
+                """INSERT INTO questions (chapter_id, type, prompt, choices, answer, explanation, source_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (p["chapter_id"], norm["type"], norm["prompt"], json.dumps(norm["choices"]),
+                 norm["answer"], norm["explanation"], p["source_id"]))
+        else:  # edit — apply only if the original question still exists
+            if conn.execute("SELECT 1 FROM questions WHERE id = ?", (p["question_id"],)).fetchone():
+                conn.execute(
+                    """UPDATE questions SET type = ?, prompt = ?, choices = ?, answer = ?, explanation = ?
+                       WHERE id = ?""",
+                    (norm["type"], norm["prompt"], json.dumps(norm["choices"]), norm["answer"],
+                     norm["explanation"], p["question_id"]))
+        conn.execute("UPDATE proposals SET status = 'approved' WHERE id = ?", (pid,))
+    return RedirectResponse("/review", status_code=303)
+
+
+@app.post("/proposals/{pid}/reject")
+def reject_proposal(request: Request, pid: int):
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        conn.execute("UPDATE proposals SET status = 'rejected' WHERE id = ? AND status = 'pending'", (pid,))
+    return RedirectResponse("/review", status_code=303)
 
 
 # --------------------------------------------------------------------------

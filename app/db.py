@@ -124,8 +124,44 @@ CREATE TABLE IF NOT EXISTS question_flags (
     UNIQUE (question_id, user_id)
 );
 
+-- Background LLM tasks (run by an in-process worker thread). A job produces
+-- zero or more `proposals` that an admin reviews before anything hits the bank.
+CREATE TABLE IF NOT EXISTS jobs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL CHECK (kind IN ('generate_more','flag_fix')),
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','running','done','error')),
+    user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    question_id INTEGER REFERENCES questions(id) ON DELETE CASCADE,
+    message     TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at TEXT
+);
+
+-- A proposed change to the bank, pending admin approval. 'add' = a new question
+-- (question_id NULL); 'edit' = a corrected version of an existing question.
+CREATE TABLE IF NOT EXISTS proposals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id      INTEGER REFERENCES jobs(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL CHECK (kind IN ('add','edit')),
+    chapter_id  INTEGER REFERENCES chapters(id) ON DELETE CASCADE,
+    question_id INTEGER REFERENCES questions(id) ON DELETE CASCADE,
+    type        TEXT NOT NULL DEFAULT 'mcq',
+    prompt      TEXT NOT NULL DEFAULT '',
+    choices     TEXT NOT NULL DEFAULT '[]',
+    answer      TEXT NOT NULL DEFAULT '',
+    explanation TEXT NOT NULL DEFAULT '',
+    source_id   INTEGER REFERENCES sources(id) ON DELETE SET NULL,
+    rationale   TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','approved','rejected')),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_chapters_subject ON chapters(subject_id);
 CREATE INDEX IF NOT EXISTS idx_flags_question ON question_flags(question_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
 CREATE INDEX IF NOT EXISTS idx_questions_chapter ON questions(chapter_id);
 CREATE INDEX IF NOT EXISTS idx_answers_session ON answers(session_id);
 CREATE INDEX IF NOT EXISTS idx_answers_question ON answers(question_id);

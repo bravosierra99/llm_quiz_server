@@ -241,3 +241,80 @@ def review_results(weak_rows):
     except (httpx.HTTPError, KeyError, IndexError) as e:
         return {"ok": False, "text": "", "error": f"AI request failed: {e}"}
     return {"ok": True, "text": (text or "").strip(), "error": ""}
+
+
+def _extract_json_object(text):
+    """Pull a single JSON object out of a model response (may be fenced/prose)."""
+    if not text:
+        raise ValueError("empty response")
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1)
+    text = text.strip()
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        data = json.loads(text[start:end + 1])
+        if isinstance(data, dict):
+            return data
+    raise ValueError("no JSON object found in model output")
+
+
+VERIFY_SYSTEM_PROMPT = """You fact-check and edit one study-quiz question. You are \
+given the question, its subject/chapter context, a knowledge-base excerpt, and web \
+search results. Decide whether it is factually correct and well-formed, and either \
+confirm it or propose a corrected version.
+
+Output ONLY a JSON object (no prose, no code fences) with EXACTLY these keys:
+  "needs_fix": true or false
+  "type": "mcq" | "truefalse" | "short" (keep the original unless clearly wrong)
+  "prompt": the question text (corrected if needed)
+  "choices": for "mcq" the list of options including the correct one; for \
+"truefalse" ["True","False"]; for "short" []
+  "answer": the correct answer. For "mcq" it MUST be one of the choices verbatim; \
+for "truefalse" "True" or "False"; for "short" a concise canonical answer.
+  "explanation": one or two sentences.
+  "rationale": a short note on what you changed and why (or why it is already correct).
+
+If the question is already correct, set "needs_fix" to false and echo the existing \
+fields unchanged. Prefer the knowledge base and search results over assumptions."""
+
+
+def verify_and_fix(question, context, kb_text, search_text):
+    """Ask the model to verify/correct one question. `question` is a dict with
+    type/prompt/choices/answer/explanation. Returns the parsed dict (with
+    needs_fix + fields + rationale) or raises on connection/parse failure so the
+    caller can mark the job errored."""
+    cur = (
+        f"Question type: {question['type']}\n"
+        f"Prompt: {question['prompt']}\n"
+        f"Choices: {question.get('choices') or []}\n"
+        f"Answer key: {question['answer']}\n"
+        f"Explanation: {question.get('explanation', '')}"
+    )
+    user_prompt = (
+        f"{context}\n\n=== CURRENT QUESTION ===\n{cur}\n\n"
+        f"=== KNOWLEDGE BASE ===\n{kb_text or '(none provided)'}\n\n"
+        f"=== WEB SEARCH RESULTS ===\n{search_text or '(none)'}"
+    )
+    messages = [
+        {"role": "system", "content": VERIFY_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+    # One retry on a hard parse failure — local models often wrap JSON in prose.
+    for attempt in range(2):
+        raw = _chat(messages)        # may raise httpx.HTTPError -> job error
+        try:
+            return _extract_json_object(raw)
+        except ValueError:
+            if attempt == 0:
+                messages.append({"role": "assistant", "content": raw})
+                messages.append({"role": "user", "content": "That was not valid JSON. "
+                                 "Reply with ONLY the JSON object, no prose and no code fences."})
+            else:
+                raise

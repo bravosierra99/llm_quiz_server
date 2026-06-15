@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Review · FleetQuiz{% endblock %}
+{% block body %}
+<h1>Review</h1>
+<p class="muted">LLM proposals from <em>generate more like this</em> and <em>flag for
+  review</em>. Nothing enters the question bank until you approve it.</p>
+
+<h2>Pending proposals {% if proposals %}({{ proposals|length }}){% endif %}</h2>
+{% if proposals %}
+  {% for p in proposals %}
+  <div class="card">
+    <div class="row-between">
+      <span class="pill type-{{ p.type }}">{{ p.type }}</span>
+      <span class="muted small">{{ 'New question' if p.kind == 'add' else 'Proposed fix' }} ·
+        {{ p.chapter_name }}{% if p.job_kind %} · {{ p.job_kind }}{% endif %}</span>
+    </div>
+
+    {% if p.kind == 'edit' %}
+      <p class="muted small">Current:</p>
+      <div class="card wrong-row">
+        <p class="prompt">{{ p.cur_prompt }}</p>
+        {% if p.cur_choices %}<p class="muted">Choices: {{ p.cur_choices|join(' · ') }}</p>{% endif %}
+        <p class="answer"><strong>Answer:</strong> {{ p.cur_answer }}</p>
+        {% if p.cur_explanation %}<p class="muted explanation">{{ p.cur_explanation }}</p>{% endif %}
+      </div>
+      <p class="muted small">Proposed:</p>
+    {% endif %}
+
+    <div class="card {{ 'correct-row' if p.kind == 'edit' else '' }}">
+      <p class="prompt">{{ p.prompt }}</p>
+      {% if p.choices %}<p class="muted">Choices: {{ p.choices|join(' · ') }}</p>{% endif %}
+      <p class="answer"><strong>Answer:</strong> {{ p.answer }}</p>
+      {% if p.explanation %}<p class="muted explanation">{{ p.explanation }}</p>{% endif %}
+    </div>
+
+    {% if p.rationale %}<p class="muted small">💡 {{ p.rationale }}</p>{% endif %}
+
+    <div class="actions row-actions">
+      <form method="post" action="/proposals/{{ p.id }}/approve">
+        <button type="submit" class="btn primary small">✓ Approve</button>
+      </form>
+      <form method="post" action="/proposals/{{ p.id }}/reject">
+        <button type="submit" class="btn small">✗ Reject</button>
+      </form>
+      {% if p.kind == 'edit' and p.question_id %}
+        <a class="btn small" href="/questions/{{ p.question_id }}/edit">Edit by hand</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+<p class="muted">No proposals waiting. Flag a question or use "generate more like this" while quizzing.</p>
+{% endif %}
+
+<h2>Recent jobs</h2>
+{% if jobs %}
+<table class="data">
+  <tr><th>#</th><th>Kind</th><th>Status</th><th>Seed question</th><th>Result</th></tr>
+  {% for j in jobs %}
+  <tr>
+    <td class="muted">{{ j.id }}</td>
+    <td>{{ j.kind }}</td>
+    <td>{% if j.status == 'error' %}<span class="pill" style="color:var(--danger)">error</span>
+        {% elif j.status == 'done' %}done{% else %}<span class="muted">{{ j.status }}…</span>{% endif %}</td>
+    <td class="muted">{{ (j.qprompt or '')[:60] }}</td>
+    <td class="muted small">{{ j.message }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">No jobs yet.</p>
+{% endif %}
+{% endblock %}

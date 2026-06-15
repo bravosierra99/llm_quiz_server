@@ -9,8 +9,8 @@
   <span class="muted">{% if not session.endless %}Question {{ idx + 1 }} of {{ total }}{% else %}Question {{ idx + 1 }} · ∞ endless{% endif %}</span>
 </div>
 
-{% if added is not none %}
-<p class="flash">Added {{ added }} new question(s) to this chapter.</p>
+{% if queued %}
+<p class="flash">Working on it in the background — you'll review the new questions at the end / on the Review page.</p>
 {% endif %}
 
 <div class="card result-row {{ 'correct-row' if correct else 'wrong-row' }}">
