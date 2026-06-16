@@ -23,6 +23,18 @@ EASE_START = 2.5
 EASE_FLOOR = 1.3
 EASE_PENALTY = 0.2          # ease lost on a miss
 
+# A missed card must relearn, but NOT within the same study sitting — and the
+# thing that should bring it back is intervening *work*, not elapsed time. (Time
+# gets it wrong both ways: grind 200 questions in an hour and a time gate still
+# hides it; idle a week studying nothing and a time gate resurfaces it as if
+# earned.) So a lapsed card stays out until you've answered a volume of OTHER
+# questions since the miss, gated as a fraction of the unseen pool still in
+# scope. This auto-adapts: lots unseen → long wait (coverage mode); pool nearly
+# exhausted → short wait (drill mode). See `select_question_ids`.
+RELEARN_FRACTION = 0.4   # come back after seeing ~40% of the still-unseen pool
+RELEARN_FLOOR = 15       # ...but never within ~a session, even when little is unseen
+RELEARN_CAP = 200        # ...and never buried forever on a huge bank
+
 # How many brand-new questions to introduce in a single quiz. Without a cap, a
 # fresh chapter would dump dozens of new cards at once and nothing would get the
 # spaced repetition that makes any of this work.
@@ -75,9 +87,12 @@ def grade(conn, user_id, question_id, correct):
         reps = 0
         lapses += 1
         ease = max(EASE_FLOOR, ease - EASE_PENALTY)
-        interval = 0.0   # relearn: due again right away
+        interval = 0.0   # relearning: reps=0 + interval 0 is how selection spots a lapse
 
     now = _now()
+    # due_at is the raw SM-2 time. For a lapse that's `now`, but selection does NOT
+    # treat a lapsed card as due on time alone — it holds it out until enough OTHER
+    # questions have been answered since `last_reviewed` (the volume gate below).
     due = now + timedelta(days=interval)
     conn.execute(
         """INSERT INTO review_state
@@ -146,32 +161,70 @@ def select_question_ids(conn, user_id, chapter_ids, limit, order="adaptive", exc
 
     # Adaptive.
     rows = conn.execute(
-        f"""SELECT q.id AS id, r.due_at AS due_at
+        f"""SELECT q.id AS id, r.due_at AS due_at, r.reps AS reps,
+                   r.last_reviewed AS last_reviewed
             FROM questions q
             LEFT JOIN review_state r ON r.question_id = q.id AND r.user_id = ?
             WHERE q.chapter_id IN ({ph})""",
         (user_id, *chapter_ids),
     ).fetchall()
     now = _fmt(_now())
-    due, new, future = [], [], []
+    # A reviewed card with reps==0 is in *relearning* (freshly missed or never
+    # passed). It is NOT served on time alone — it waits behind a volume of other
+    # questions answered since the miss (see RELEARN_* and `_relearn_ready`). The
+    # rest is classic SM-2: due-by-time first, then new, then not-yet-due.
+    due, new, future, relearn = [], [], [], []
     for r in rows:
         if r["id"] in exclude:
             continue
         if r["due_at"] is None:
             new.append(r["id"])
+        elif r["reps"] == 0:
+            relearn.append(r)            # keep the row; needs last_reviewed below
         elif r["due_at"] <= now:
             due.append(r["id"])
         else:
             future.append(r["id"])
+
+    # Volume gate width scales to how much of the in-scope pool is still unseen:
+    # plenty unseen → wait long (stay in coverage mode); little unseen → short
+    # wait (drill the misses). Floor keeps a miss out of the same sitting; cap
+    # stops it being buried on a huge bank.
+    gap = max(RELEARN_FLOOR, min(RELEARN_CAP, round(RELEARN_FRACTION * len(new))))
+    relearn_ready, relearn_waiting = [], []
+    for r in relearn:
+        (relearn_ready if _relearn_ready(conn, user_id, r["last_reviewed"], gap)
+         else relearn_waiting).append(r["id"])
+
     # Randomise within each tier: a random sample across the pooled chapters is
     # drawn in proportion to each chapter's question count, and the lead-off
     # questions vary from quiz to quiz. Spaced-repetition priority is preserved at
-    # the tier level (all due before any new, new before not-yet-due).
+    # the tier level. A relearn card that has served its gap rejoins the due tier;
+    # one still waiting is held to the very back — a last resort that only gets
+    # served if there's genuinely nothing fresh left to ask.
+    due += relearn_ready
     random.shuffle(due)
     random.shuffle(new)
     random.shuffle(future)
-    ordered = due + new[:NEW_CARDS_PER_SESSION] + future
+    random.shuffle(relearn_waiting)
+    ordered = due + new[:NEW_CARDS_PER_SESSION] + future + relearn_waiting
     return ordered[:limit]
+
+
+def _relearn_ready(conn, user_id, last_reviewed, gap):
+    """True once at least `gap` questions have been answered (by this user, across
+    any session) since `last_reviewed` — the miss that put this card in relearning.
+    Counts intervening *work*, not elapsed time, so cramming brings a miss back and
+    idle time never does. `> last_reviewed` excludes the lapsing answer itself."""
+    if last_reviewed is None:
+        return True
+    n = conn.execute(
+        """SELECT COUNT(*) FROM answers a
+           JOIN quiz_sessions s ON s.id = a.session_id
+           WHERE s.user_id = ? AND a.answered_at > ?""",
+        (user_id, last_reviewed),
+    ).fetchone()[0]
+    return n >= gap
 
 
 # --------------------------------------------------------------------------
