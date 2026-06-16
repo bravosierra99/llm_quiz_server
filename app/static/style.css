@@ -160,12 +160,16 @@ code {
 @media (max-width: 640px) {
   .topbar { flex-wrap: wrap; gap: .6rem 1rem; }
   .nav-toggle { display: inline-flex; }
+  /* Degrade to visible: the nav shows by default, and JS *collapses* it (adds
+     .nav-collapsed). If Alpine never loads — CDN blocked, offline homelab — the
+     class is never applied and the nav stays visible (usable, just not
+     collapsible) instead of vanishing. */
   .topbar nav {
-    display: none;
+    display: flex;
     order: 3; flex-basis: 100%; flex-direction: column; gap: .15rem;
     padding-top: .4rem; border-top: 1px solid var(--border);
   }
-  .topbar nav.nav-open { display: flex; }
+  .topbar nav.nav-collapsed { display: none; }
   .topbar .who { margin-left: auto; }
 }
 
