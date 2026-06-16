@@ -625,9 +625,16 @@ def quiz_answer(request: Request, session_id: int, idx: int,
                 conn, session["user_id"], jloads(session["chapter_ids"]), 1, "adaptive",
                 exclude=set(qids))
             if nxt:
+                # Append AFTER the highest existing position, not at len(qids):
+                # deleting a question mid-session cascade-removes its row and
+                # leaves a hole, so len(qids) can collide with a surviving
+                # position. MAX(position)+1 stays unique regardless of holes.
+                next_pos = conn.execute(
+                    "SELECT COALESCE(MAX(position), -1) + 1 FROM session_questions WHERE session_id = ?",
+                    (session_id,)).fetchone()[0]
                 conn.execute(
                     "INSERT INTO session_questions (session_id, position, question_id) VALUES (?, ?, ?)",
-                    (session_id, len(qids), nxt[0]))
+                    (session_id, next_pos, nxt[0]))
                 appended = True
     has_next = (idx + 1) < len(qids) or appended
     # PRG (all targets survive refresh). Get-it-right: don't interrupt — go
