@@ -103,6 +103,8 @@ form { margin: 0; }
 .tutor-assistant { background: var(--panel); }
 .tutor-who { font-size: .7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 .tutor-text { white-space: pre-wrap; margin: .25rem 0 0; }
+.tutor-pending { color: var(--muted); font-style: italic; animation: tutor-pulse 1.2s ease-in-out infinite; }
+@keyframes tutor-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 
 table.data { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 table.data th, table.data td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--border); }

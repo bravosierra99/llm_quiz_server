@@ -10,7 +10,8 @@ import random
 from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               PlainTextResponse, RedirectResponse)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -949,19 +950,31 @@ def tutor_ask(request: Request, question_id: int, message: str = Form(""),
     user, redirect = require_user(request)
     if redirect:
         return redirect
+    wants_json = "application/json" in request.headers.get("accept", "")
     msg = message.strip()
     if not msg:
+        if wants_json:
+            return JSONResponse({"ok": False, "error": "empty message"}, status_code=400)
         return RedirectResponse(_tutor_url(question_id, back), status_code=303)
     with get_conn() as conn:  # load + CLOSE before the model call
         ctx = _tutor_context_row(conn, question_id)
         if not ctx:
+            if wants_json:
+                return JSONResponse({"ok": False, "error": "question not found"}, status_code=404)
             return RedirectResponse("/", status_code=303)
         history = [dict(r) for r in conn.execute(
             "SELECT role, content FROM tutor_messages WHERE user_id = ? AND question_id = ? "
             "ORDER BY id", (user["id"], question_id))]
+    # Synchronous LLM call (same exposure as the live path — see note above). The
+    # browser's fetch awaits it just like the full-page POST does; we just return
+    # the reply as JSON so the page can swap it in without a reload. If a reply ever
+    # breaches the front proxy window you'll see 524s in `logs errors` — that's the
+    # signal to move THIS one call to an enqueue+poll job, not before.
     reply = _tutor_call(_tutor_context_block(ctx), history, msg)
     with get_conn() as conn:
         _store_tutor(conn, user["id"], question_id, msg, reply)
+    if wants_json:
+        return JSONResponse({"ok": True, "user": msg, "reply": reply})
     return RedirectResponse(_tutor_url(question_id, back), status_code=303)
 
 
