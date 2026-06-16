@@ -3,24 +3,45 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#4f46e5">
   <title>{% block title %}FleetQuiz{% endblock %}</title>
+  <!-- Apply the saved theme before first paint so there's no light/dark flash.
+       No value stored => fall back to the OS preference (handled by CSS). -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="/static/style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 </head>
 <body>
-<header class="topbar">
+{% set path = request.url.path if request else '/' %}
+<header class="topbar" x-data="{ open: false }">
   <a class="brand" href="/">🧠 FleetQuiz</a>
-  <nav>
-    <a href="/">Library</a>
-    <a href="/quiz">Take a quiz</a>
-    <a href="/history">History</a>
-    {% if user and user.is_admin %}<a href="/analytics">Analytics</a>
-    <a href="/review">Review</a>
-    <a href="/import">Import</a>{% endif %}
+  <button class="icon-btn nav-toggle" type="button" @click="open = !open"
+          aria-label="Toggle menu">☰</button>
+  <nav :class="{ 'nav-collapsed': !open }" @click="open = false">
+    <a href="/" class="{{ 'active' if path == '/' else '' }}">Library</a>
+    <a href="/quiz" class="{{ 'active' if path.startswith('/quiz') else '' }}">Take a quiz</a>
+    <a href="/history" class="{{ 'active' if path.startswith('/history') else '' }}">History</a>
+    {% if user and user.is_admin %}
+    <a href="/analytics" class="{{ 'active' if path.startswith('/analytics') else '' }}">Analytics</a>
+    <a href="/review" class="{{ 'active' if path.startswith('/review') else '' }}">Review</a>
+    <a href="/import" class="{{ 'active' if path.startswith('/import') else '' }}">Import</a>
+    {% endif %}
   </nav>
   <div class="who">
+    <button class="icon-btn" type="button" aria-label="Toggle light/dark"
+            title="Toggle light/dark" onclick="toggleTheme()">
+      <span class="theme-icon">🌗</span>
+    </button>
     {% if user %}
       <span class="pill">{{ user.name }}{% if user.is_admin %} ⭐{% endif %}</span>
-      <a href="/logout" class="muted">switch</a>
+      <a href="/logout" class="muted small">switch</a>
     {% else %}
       <a href="/who">Sign in</a>
     {% endif %}
@@ -31,6 +52,20 @@
 </main>
 <footer class="muted">FleetQuiz · family study · self-hosted</footer>
 <script>
+// Theme toggle: flip the explicit choice and remember it. With nothing stored we
+// follow the OS (see the inline <head> script + the prefers-color-scheme CSS), so
+// the first toggle picks the opposite of whatever is currently showing.
+function toggleTheme() {
+  var root = document.documentElement;
+  var cur = root.getAttribute('data-theme');
+  if (!cur) {
+    cur = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  var next = cur === 'dark' ? 'light' : 'dark';
+  root.setAttribute('data-theme', next);
+  try { localStorage.setItem('theme', next); } catch (e) {}
+}
+
 // Don't let a second action fire while one is still working: when any form inside
 // an action row submits, disable every button in that row (the submit itself still
 // goes through). Stops e.g. firing two tutor calls from the feedback screen.

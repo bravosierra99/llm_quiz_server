@@ -10,8 +10,9 @@
   <p class="muted small">{{ q.subject }} · {{ q.chapter }}</p>
 </div>
 
-{% if messages %}
-<div class="tutor-thread">
+<p class="muted tutor-empty"{% if messages %} hidden{% endif %}>Ask the tutor anything
+  about this question or topic.</p>
+<div class="tutor-thread" id="tutor-thread">
   {% for m in messages %}
   <div class="tutor-msg tutor-{{ m.role }}">
     <span class="tutor-who">{{ 'You' if m.role == 'user' else 'Tutor' }}</span>
@@ -19,11 +20,8 @@
   </div>
   {% endfor %}
 </div>
-{% else %}
-<p class="muted">Ask the tutor anything about this question or topic.</p>
-{% endif %}
 
-<form method="post" action="/tutor/{{ question_id }}/ask" class="stack card"
+<form method="post" action="/tutor/{{ question_id }}/ask" class="stack card" id="tutor-form"
       onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Thinking…';">
   <input type="hidden" name="back" value="{{ back or '' }}">
   <label>Ask a follow-up
@@ -32,4 +30,74 @@
   </label>
   <button type="submit" class="primary">Ask →</button>
 </form>
+
+<script>
+// Progressive enhancement: when JS is on, send the follow-up with fetch and swap
+// the reply into the thread in place — no full-page reload. The plain <form> POST
+// above is the no-JS fallback (it 303s back to this page), so this only takes over
+// when scripting is available.
+(function () {
+  var form = document.getElementById('tutor-form');
+  if (!form || !window.fetch) return;
+  var thread = document.getElementById('tutor-thread');
+  var empty = document.querySelector('.tutor-empty');
+  var textarea = form.querySelector('textarea');
+  var button = form.querySelector('button');
+
+  function bubble(role, text) {
+    var wrap = document.createElement('div');
+    wrap.className = 'tutor-msg tutor-' + role;
+    var who = document.createElement('span');
+    who.className = 'tutor-who';
+    who.textContent = role === 'user' ? 'You' : 'Tutor';
+    var p = document.createElement('p');
+    p.className = 'tutor-text';
+    p.textContent = text;
+    wrap.appendChild(who);
+    wrap.appendChild(p);
+    thread.appendChild(wrap);
+    wrap.scrollIntoView({block: 'nearest'});
+    return p; // so callers can update the text later (the thinking placeholder)
+  }
+
+  form.addEventListener('submit', function (e) {
+    var msg = textarea.value.trim();
+    if (!msg) return; // let the browser's required-validation handle it
+    e.preventDefault();
+    if (empty) empty.hidden = true;
+    button.disabled = true;
+    button.textContent = 'Thinking…';
+    textarea.value = '';
+
+    bubble('user', msg);
+    var pending = bubble('assistant', 'Thinking…');
+    pending.classList.add('tutor-pending');
+
+    var body = new URLSearchParams();
+    body.set('message', msg);
+    body.set('back', form.querySelector('input[name=back]').value);
+
+    fetch(form.action, {
+      method: 'POST',
+      headers: {'Accept': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded'},
+      body: body.toString()
+    }).then(function (r) {
+      if (!r.ok) throw new Error('http ' + r.status);
+      return r.json();
+    }).then(function (data) {
+      pending.textContent = data.reply || '(The tutor didn’t say anything — try again.)';
+      pending.classList.remove('tutor-pending');
+    }).catch(function () {
+      pending.textContent = 'I couldn’t reach the tutor right now. Please try again in a moment.';
+      pending.classList.remove('tutor-pending');
+    }).then(function () {
+      button.disabled = false;
+      button.textContent = 'Ask →';
+      pending.scrollIntoView({block: 'nearest'});
+      textarea.focus();
+    });
+  });
+})();
+</script>
 {% endblock %}
