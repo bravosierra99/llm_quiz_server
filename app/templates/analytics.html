@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}Analytics{% if scope_user %} · {{ scope_user.name }}{% endif %} · FleetQuiz{% endblock %}
 {% block body %}
 
@@ -56,7 +57,7 @@ to curate the bank and keep an eye on each learner.</p>
     {% for u in users %}
     <tr>
       <td>{{ u.name }}{% if u.is_admin %} <span class="muted">⭐</span>{% endif %}</td>
-      <td>{% if u.pct is not none %}<strong>{{ u.pct }}%</strong> <span class="muted">({{ u.correct }}/{{ u.attempts }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>{{ ui.score(u.pct, '(' ~ u.correct ~ '/' ~ u.attempts ~ ')') }}</td>
       <td>{{ u.attempts }}</td>
       <td>{{ u.mastered }}</td>
       <td class="muted">{{ u.last_active[:10] if u.last_active else '—' }}</td>

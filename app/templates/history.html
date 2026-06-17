@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}History · FleetQuiz{% endblock %}
 {% block body %}
 <h1>{{ user.name }}'s history</h1>
@@ -30,7 +31,7 @@
     <td class="muted nowrap">{{ s.finished_at[:10] }}<br><span class="small">{{ s.finished_at[11:16] }}</span></td>
     <td>{{ s.label }}</td>
     <td>{{ s.correct }}/{{ s.total }}</td>
-    <td><span class="score {{ 'good' if pct >= 80 else 'warn' if pct >= 60 else 'bad' }}">{{ pct|round(0, 'floor')|int }}%</span></td>
+    <td>{{ ui.score(pct) }}</td>
   </tr>
   {% endfor %}
 </table>

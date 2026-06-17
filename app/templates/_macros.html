@@ -1,0 +1,14 @@
+{# Shared UI helpers. Import with:  {% import "_macros.html" as ui %} #}
+
+{# A percentage coloured by band: good (>=80) / warn (>=60) / bad (<60).
+   Pass pct as a number (0-100) or None for an em-dash. Optional `sub` is a
+   muted suffix like "(9/10)". Keep the thresholds here in one place so every
+   view scores the same way. #}
+{% macro score(pct, sub='') -%}
+  {%- if pct is none -%}
+    <span class="muted">—</span>
+  {%- else -%}
+    <span class="score {{ 'good' if pct >= 80 else 'warn' if pct >= 60 else 'bad' }}">{{ pct|round(0, 'floor')|int }}%</span>
+    {%- if sub %} <span class="muted">{{ sub }}</span>{% endif -%}
+  {%- endif -%}
+{%- endmacro %}

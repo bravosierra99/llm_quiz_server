@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block body %}
 <div class="row-between">
   <h1>Library</h1>
@@ -61,10 +62,11 @@
 <table class="data">
   <tr><th>When</th><th>Topics</th><th>Score</th></tr>
   {% for r in recent %}
+  {% set pct = (r.correct / r.total * 100) if r.total else 0 %}
   <tr>
     <td class="muted nowrap">{{ r.finished_at[:10] }}<br><span class="small">{{ r.finished_at[11:16] }}</span></td>
     <td>{{ r.label }}</td>
-    <td>{{ r.correct }}/{{ r.total }}</td>
+    <td>{{ ui.score(pct, '· ' ~ r.correct ~ '/' ~ r.total) }}</td>
   </tr>
   {% endfor %}
 </table>
