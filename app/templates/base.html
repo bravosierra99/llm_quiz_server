@@ -63,7 +63,7 @@
 <main>
   {% block body %}{% endblock %}
 </main>
-<footer class="muted">FleetQuiz · family study · self-hosted</footer>
+<footer class="muted">FleetQuiz · family study · self-hosted{% if app_version %} · v{{ app_version }}{% endif %}</footer>
 <script>
 // Theme toggle: flip the explicit choice and remember it. With nothing stored we
 // follow the OS (see the inline <head> script + the prefers-color-scheme CSS), so

@@ -16,7 +16,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import ai, auth, importer, jobs, scheduler, sources
+from . import ai, auth, importer, jobs, scheduler, sources, version
 from .db import get_conn, init_db, jloads
 from .importer import import_bank_data
 
@@ -43,6 +43,7 @@ def render(request, template, **ctx):
     ctx.setdefault("user", info["effective"])
     ctx.setdefault("acting", info["acting"])
     ctx.setdefault("real_user", info["real"])
+    ctx.setdefault("app_version", version.VERSION)
     ctx["request"] = request
     return templates.TemplateResponse(template, ctx)
 
@@ -1569,4 +1570,4 @@ async def import_run(request: Request):
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok"}
+    return {"status": "ok", "version": version.VERSION}

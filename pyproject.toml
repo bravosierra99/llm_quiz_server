@@ -1,0 +1,15 @@
+[project]
+name = "fleetquiz"
+version = "0.0.0"  # bumped by scripts/version-bump.sh; first release is v0.1.0
+description = "FleetQuiz — a self-hosted family study-quiz app (FastAPI + SQLite)."
+requires-python = ">=3.12"
+# Runtime deps are pinned in requirements.txt (the Dockerfile and `uv run
+# --with-requirements requirements.txt ...` both use it). This [project] table
+# exists mainly to give the version number a single home that scripts/version-bump.sh
+# updates; it is NOT packaged/installed.
+
+[tool.uv]
+# Do not try to build/install this directory as a package — there's no build
+# backend and nothing imports it as one. Without this, `uv run` would attempt to
+# build the project and fail. We only ever use `uv run --with-requirements ...`.
+package = false

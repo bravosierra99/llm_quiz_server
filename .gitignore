@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+# Runtime deps are pinned in requirements.txt; uv only ever runs the app via
+# --with-requirements (the project isn't packaged), so its lockfile is noise.
+uv.lock
 .env
 data/
 *.db
