@@ -1,10 +1,11 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% block title %}Library · FleetQuiz{% endblock %}
 {% block body %}
 <div class="row-between">
   <h1>Library</h1>
   <a href="/quiz" class="btn primary">Take a quiz →</a>
 </div>
+<p class="muted">Your study material — the subjects you're learning, and others you can add.</p>
 
 <h2>Your subjects</h2>
 {% if subjects %}
@@ -53,23 +54,6 @@
     <label>Description <input name="description" placeholder="optional"></label>
     <button type="submit" class="primary">Add subject</button>
   </form>
-</div>
-{% endif %}
-
-{% if recent %}
-<h2>Your recent quizzes</h2>
-<div class="table-scroll">
-<table class="data">
-  <tr><th>When</th><th>Topics</th><th>Score</th></tr>
-  {% for r in recent %}
-  {% set pct = (r.correct / r.total * 100) if r.total else 0 %}
-  <tr>
-    <td class="muted nowrap">{{ r.finished_at[:10] }}<br><span class="small">{{ r.finished_at[11:16] }}</span></td>
-    <td>{{ r.label }}</td>
-    <td>{{ ui.score(pct, '· ' ~ r.correct ~ '/' ~ r.total) }}</td>
-  </tr>
-  {% endfor %}
-</table>
 </div>
 {% endif %}
 {% endblock %}

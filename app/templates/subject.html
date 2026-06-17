@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ subject.name }} · FleetQuiz{% endblock %}
 {% block body %}
-<p class="muted"><a href="/">Library</a> / {{ subject.name }}</p>
+<p class="muted"><a href="/library">Library</a> / {{ subject.name }}</p>
 <div class="row-between">
   <h1>{{ subject.name }}</h1>
   <form method="post" action="/subjects/{{ subject.id }}/delete"

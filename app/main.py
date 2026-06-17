@@ -7,7 +7,7 @@ on any device with no build step. Routes are grouped: identity, library
 import json
 import os
 import random
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
@@ -108,30 +108,77 @@ def logout():
 # --------------------------------------------------------------------------
 # Dashboard + library
 # --------------------------------------------------------------------------
+def _study_streak(days: set) -> int:
+    """Consecutive calendar days (UTC) ending today with at least one finished
+    quiz. A quiz today *or* yesterday keeps the streak alive; the first gap ends
+    it. Bucketed on the same UTC date the rest of the app displays."""
+    if not days:
+        return 0
+    today = datetime.now(timezone.utc).date()
+    cur = today if today in days else today - timedelta(days=1)
+    if cur not in days:
+        return 0
+    streak = 0
+    while cur in days:
+        streak += 1
+        cur -= timedelta(days=1)
+    return streak
+
+
+# Subject counts used by the library listing.
+_SUBJECT_COUNTS = """SELECT s.*,
+               (SELECT COUNT(*) FROM chapters c WHERE c.subject_id = s.id) AS chapter_count,
+               (SELECT COUNT(*) FROM questions q JOIN chapters c ON q.chapter_id = c.id
+                  WHERE c.subject_id = s.id) AS question_count
+        FROM subjects s"""
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
+    """Home dashboard: what to do next and how you're doing. Subject management
+    lives on /library."""
     user, redirect = require_user(request)
     if redirect:
         return redirect
-    counts = """SELECT s.*,
-                   (SELECT COUNT(*) FROM chapters c WHERE c.subject_id = s.id) AS chapter_count,
-                   (SELECT COUNT(*) FROM questions q JOIN chapters c ON q.chapter_id = c.id
-                      WHERE c.subject_id = s.id) AS question_count
-            FROM subjects s"""
     with get_conn() as conn:
-        # A user's library is the subjects they've added to their area; the rest
-        # are offered under "add to your area".
-        enrolled = [dict(r) for r in conn.execute(
-            counts + " JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = ?"
-            " ORDER BY s.name", (user["id"],))]
-        available = [dict(r) for r in conn.execute(
-            counts + " WHERE s.id NOT IN (SELECT subject_id FROM user_subjects WHERE user_id = ?)"
-            " ORDER BY s.name", (user["id"],))]
         recent = [dict(r) for r in conn.execute("""
             SELECT * FROM quiz_sessions WHERE user_id = ? AND finished_at IS NOT NULL
             ORDER BY finished_at DESC LIMIT 8
         """, (user["id"],))]
-    return render(request, "index.html", subjects=enrolled, available=available, recent=recent)
+        totals = conn.execute("""
+            SELECT COUNT(*) AS quizzes, COALESCE(SUM(correct), 0) AS correct,
+                   COALESCE(SUM(total), 0) AS answered
+            FROM quiz_sessions WHERE user_id = ? AND finished_at IS NOT NULL
+        """, (user["id"],)).fetchone()
+        days = [r[0] for r in conn.execute(
+            "SELECT DISTINCT substr(finished_at, 1, 10) FROM quiz_sessions "
+            "WHERE user_id = ? AND finished_at IS NOT NULL", (user["id"],))]
+        has_subjects = conn.execute(
+            "SELECT 1 FROM user_subjects WHERE user_id = ? LIMIT 1", (user["id"],)).fetchone()
+    summary = dict(totals)
+    summary["pct"] = (round(summary["correct"] / summary["answered"] * 100)
+                      if summary["answered"] else None)
+    streak = _study_streak({date.fromisoformat(d) for d in days})
+    return render(request, "home.html", recent=recent, summary=summary,
+                  streak=streak, has_subjects=bool(has_subjects))
+
+
+@app.get("/library", response_class=HTMLResponse)
+def library(request: Request):
+    """The learner's study material: their subjects, plus subjects they can add."""
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        # A user's library is the subjects they've added to their area; the rest
+        # are offered under "add to your area".
+        enrolled = [dict(r) for r in conn.execute(
+            _SUBJECT_COUNTS + " JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = ?"
+            " ORDER BY s.name", (user["id"],))]
+        available = [dict(r) for r in conn.execute(
+            _SUBJECT_COUNTS + " WHERE s.id NOT IN (SELECT subject_id FROM user_subjects WHERE user_id = ?)"
+            " ORDER BY s.name", (user["id"],))]
+    return render(request, "library.html", subjects=enrolled, available=available)
 
 
 @app.post("/subjects")
@@ -145,7 +192,7 @@ def create_subject(request: Request, name: str = Form(...), description: str = F
         # The creator gets it in their own area straight away.
         conn.execute("INSERT OR IGNORE INTO user_subjects (user_id, subject_id) VALUES (?, ?)",
                      (user["id"], cur.lastrowid))
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse("/library", status_code=303)
 
 
 @app.post("/subjects/{subject_id}/enroll")
@@ -157,7 +204,7 @@ def enroll_subject(request: Request, subject_id: int):
     with get_conn() as conn:
         conn.execute("INSERT OR IGNORE INTO user_subjects (user_id, subject_id) VALUES (?, ?)",
                      (user["id"], subject_id))
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse("/library", status_code=303)
 
 
 @app.post("/subjects/{subject_id}/unenroll")
@@ -169,7 +216,7 @@ def unenroll_subject(request: Request, subject_id: int):
     with get_conn() as conn:
         conn.execute("DELETE FROM user_subjects WHERE user_id = ? AND subject_id = ?",
                      (user["id"], subject_id))
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse("/library", status_code=303)
 
 
 @app.get("/subjects/{subject_id}", response_class=HTMLResponse)
@@ -210,7 +257,7 @@ def delete_subject(request: Request, subject_id: int):
         return redirect
     with get_conn() as conn:
         conn.execute("DELETE FROM subjects WHERE id = ?", (subject_id,))
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse("/library", status_code=303)
 
 
 @app.get("/chapters/{chapter_id}", response_class=HTMLResponse)

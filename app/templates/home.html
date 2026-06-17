@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Home · FleetQuiz{% endblock %}
+{% block body %}
+<div class="row-between">
+  <h1>Hi, {{ user.name }} 👋</h1>
+  <a href="/quiz" class="btn primary">Take a quiz →</a>
+</div>
+
+{% if summary.quizzes %}
+<div class="kpi-grid">
+  <div class="kpi">
+    <span class="kpi-num">{{ summary.quizzes }}</span>
+    <span class="kpi-label">Quizzes</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-num">{% if summary.pct is not none %}{{ summary.pct }}%{% else %}—{% endif %}</span>
+    <span class="kpi-label">Accuracy</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-num">{% if streak %}🔥 {{ streak }}{% else %}—{% endif %}</span>
+    <span class="kpi-label">Day streak</span>
+  </div>
+</div>
+{% endif %}
+
+{% if recent %}
+<div class="row-between">
+  <h2>Recent quizzes</h2>
+  <a href="/history" class="small">All history →</a>
+</div>
+<div class="table-scroll">
+<table class="data">
+  <tr><th>When</th><th>Topics</th><th>Score</th></tr>
+  {% for r in recent %}
+  {% set pct = (r.correct / r.total * 100) if r.total else 0 %}
+  <tr>
+    <td class="muted nowrap">{{ r.finished_at[:10] }}<br><span class="small">{{ r.finished_at[11:16] }}</span></td>
+    <td>{{ r.label }}</td>
+    <td>{{ ui.score(pct, '· ' ~ r.correct ~ '/' ~ r.total) }}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+<p class="muted small">Manage what you're studying in your <a href="/library">Library</a>.</p>
+{% else %}
+<div class="card">
+  <h2>Welcome to FleetQuiz</h2>
+  {% if has_subjects %}
+  <p class="muted">You're all set up — you just haven't finished a quiz yet.
+    Jump in and your scores and streak will start showing up here.</p>
+  <a href="/quiz" class="btn primary">Take your first quiz →</a>
+  {% else %}
+  <p class="muted">First, add the subjects you want to study from your
+    <strong>Library</strong>. Then take a quiz and your progress shows up here.</p>
+  <a href="/library" class="btn primary">Go to your Library →</a>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

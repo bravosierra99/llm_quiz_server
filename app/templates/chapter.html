@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ chapter.name }} · FleetQuiz{% endblock %}
 {% block body %}
-<p class="muted"><a href="/">Library</a> / <a href="/subjects/{{ chapter.subject_id }}">{{ chapter.subject_name }}</a> / {{ chapter.name }}</p>
+<p class="muted"><a href="/library">Library</a> / <a href="/subjects/{{ chapter.subject_id }}">{{ chapter.subject_name }}</a> / {{ chapter.name }}</p>
 <div class="row-between">
   <h1>{{ chapter.name }}</h1>
   <div class="actions">
