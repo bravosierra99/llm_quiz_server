@@ -14,15 +14,12 @@
 <p class="muted">Question {{ idx + 1 }} · ∞ endless · {{ session.label }}</p>
 {% endif %}
 
-{% if idx > 0 %}
-<p class="quiz-nav">
-  <a class="btn small" href="/quiz/{{ session.id }}/f/{{ idx - 1 }}"
-     hx-get="/quiz/{{ session.id }}/f/{{ idx - 1 }}">← Previous question</a>
-  <span class="muted small">review, flag, or generate more from the one you just answered</span>
-</p>
-{% endif %}
-
 <div class="card quiz-card">
+  {% if idx > 0 %}
+  {# Quiet back-link to the previous question's feedback (review / flag / generate more). #}
+  <a class="quiz-prev muted small" href="/quiz/{{ session.id }}/f/{{ idx - 1 }}"
+     hx-get="/quiz/{{ session.id }}/f/{{ idx - 1 }}" title="Review the one you just answered">← Previous question</a>
+  {% endif %}
   <span class="pill type-{{ q.type }}">{{ q.type }}</span>
   <h2 class="prompt">{{ q.prompt }}</h2>
 

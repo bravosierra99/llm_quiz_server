@@ -283,6 +283,9 @@ button:disabled, .btn:disabled { opacity: .55; cursor: default; transform: none;
 .feedback-actions { margin-top: 1.2rem; }
 .end-quiz { margin-top: 1.2rem; }
 .quiz-nav { display: flex; align-items: center; gap: .6rem; margin: .2rem 0 1rem; flex-wrap: wrap; }
+/* Quiet back-link tucked into the top of the quiz card, above the type pill. */
+.quiz-prev { display: inline-block; margin-bottom: .6rem; text-decoration: none; }
+.quiz-prev:hover { text-decoration: underline; }
 
 /* --------------------------------------------------------------------------
    Tutor chat

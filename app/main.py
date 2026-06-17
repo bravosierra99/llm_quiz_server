@@ -1011,7 +1011,9 @@ def tutor_thread(request: Request, question_id: int):
             "SELECT role, content FROM tutor_messages WHERE user_id = ? AND question_id = ? "
             "ORDER BY id", (user["id"], question_id))]
     return render(request, "tutor.html", q=ctx, messages=messages,
-                  question_id=question_id, back=request.query_params.get("back", ""))
+                  question_id=question_id, back=request.query_params.get("back", ""),
+                  is_admin=bool(user.get("is_admin")),
+                  queued=request.query_params.get("queued") == "1")
 
 
 @app.post("/tutor/{question_id}/ask")
@@ -1046,6 +1048,21 @@ def tutor_ask(request: Request, question_id: int, message: str = Form(""),
     if wants_json:
         return JSONResponse({"ok": True, "user": msg, "reply": reply})
     return RedirectResponse(_tutor_url(question_id, back), status_code=303)
+
+
+@app.post("/tutor/{question_id}/generate")
+def tutor_generate(request: Request, question_id: int, back: str = Form("")):
+    """Admin-only: queue a job that turns THIS tutor conversation into practice —
+    it feeds the whole thread (+ chapter KB) to the generator and PROPOSES new
+    questions in the question's chapter. Non-blocking; approve on the Review page.
+    Lands back on the tutor thread with a 'queued' flash."""
+    user, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    jobs.enqueue("generate_from_chat", user["id"], question_id)
+    dest = _tutor_url(question_id, back)
+    sep = "&" if "?" in dest else "?"
+    return RedirectResponse(f"{dest}{sep}queued=1", status_code=303)
 
 
 @app.get("/history", response_class=HTMLResponse)

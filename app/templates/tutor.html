@@ -4,6 +4,10 @@
 <p class="muted"><a href="{{ back or '/quiz' }}">← Back</a></p>
 <h1>📚 Tutor</h1>
 
+{% if queued %}
+<p class="flash">Generating questions from this conversation in the background — approve them on the Review page shortly.</p>
+{% endif %}
+
 <div class="card">
   <span class="pill type-{{ q.type }}">{{ q.type }}</span>
   <p class="prompt">{{ q.prompt }}</p>
@@ -30,6 +34,19 @@
   </label>
   <button type="submit" class="primary">Ask →</button>
 </form>
+
+<div class="actions">
+  <a class="btn" href="{{ back or '/quiz' }}">← Back</a>
+  {% if is_admin %}
+  {# Turn this chat into practice: feeds the whole thread to the generator and
+     proposes new questions in this chapter (admin approves on the Review page). #}
+  <form method="post" action="/tutor/{{ question_id }}/generate"
+        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Generating… (~1–2 min)';">
+    <input type="hidden" name="back" value="{{ back or '' }}">
+    <button type="submit" class="btn">✨ Generate questions from this conversation</button>
+  </form>
+  {% endif %}
+</div>
 
 <script>
 // Progressive enhancement: when JS is on, send the follow-up with fetch and swap

@@ -90,6 +90,8 @@ def run_job(jid):
     try:
         if job["kind"] == "generate_more":
             _run_generate_more(job)
+        elif job["kind"] == "generate_from_chat":
+            _run_generate_from_chat(job)
         elif job["kind"] == "flag_fix":
             _run_flag_fix(job)
         else:
@@ -162,6 +164,56 @@ def _run_generate_more(job):
             existing.add(raw["prompt"])
             n += 1
     _finish(job["id"], "done", f"proposed {n} new question(s)" + _suffix(serr))
+
+
+def _run_chat_transcript(qid, user_id):
+    """The stored tutor thread for (user, question), as a readable transcript.
+    Short read; returns '' if there's nothing yet."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT role, content FROM tutor_messages "
+            "WHERE user_id = ? AND question_id = ? ORDER BY id",
+            (user_id, qid)).fetchall()
+    who = {"user": "Learner", "assistant": "Tutor"}
+    return "\n\n".join(f"{who.get(r['role'], r['role'])}: {r['content']}" for r in rows)
+
+
+def _run_generate_from_chat(job):
+    ctx = _load_context(job["question_id"])
+    if not ctx:
+        _finish(job["id"], "error", "the question this chat was about no longer exists")
+        return
+    q, chapter, subject, kb, source_id = ctx
+    transcript = _run_chat_transcript(job["question_id"], job["user_id"])
+    if not transcript:
+        _finish(job["id"], "done", "no conversation to generate from yet")
+        return
+    topic = (f"{_subject_context(subject, chapter)} A learner has been chatting with a "
+             f"tutor about this question: \"{q['prompt']}\". Write new practice questions "
+             f"on exactly the material this conversation explores — the points the learner "
+             f"asked about or struggled with — staying in the chapter's scope and NOT "
+             f"duplicating the original question.\n\nThe conversation:\n{transcript}")
+    result = ai.generate_questions("source" if kb else "topic", topic, kb or "", 5, "medium", [q["type"]])
+    if not result["ok"]:
+        _finish(job["id"], "error", result["error"] or "generation failed")
+        return
+    n = 0
+    with get_conn() as conn:
+        existing = {r["prompt"] for r in conn.execute(
+            "SELECT prompt FROM questions WHERE chapter_id = ?", (q["chapter_id"],))}
+        existing |= {r["prompt"] for r in conn.execute(
+            "SELECT prompt FROM proposals WHERE chapter_id = ? AND status = 'pending'", (q["chapter_id"],))}
+        for raw in result["questions"]:
+            if raw["prompt"] in existing:
+                continue
+            conn.execute(
+                """INSERT INTO proposals (job_id, kind, chapter_id, type, prompt, choices, answer, explanation, source_id, rationale)
+                   VALUES (?, 'add', ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (job["id"], q["chapter_id"], raw["type"], raw["prompt"], json.dumps(raw["choices"]),
+                 raw["answer"], raw["explanation"], source_id, "Generated from a tutor conversation."))
+            existing.add(raw["prompt"])
+            n += 1
+    _finish(job["id"], "done", f"proposed {n} new question(s)")
 
 
 def _run_flag_fix(job):

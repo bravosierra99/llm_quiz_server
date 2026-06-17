@@ -139,7 +139,11 @@ CREATE TABLE IF NOT EXISTS question_flags (
 -- zero or more `proposals` that an admin reviews before anything hits the bank.
 CREATE TABLE IF NOT EXISTS jobs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind        TEXT NOT NULL CHECK (kind IN ('generate_more','flag_fix')),
+    -- `kind` is code-controlled (set by enqueue() call sites, never user input)
+    -- and dispatched in jobs.run_job, so we deliberately keep NO CHECK enum here:
+    -- a hard-coded list forced a full table rebuild for every new job kind (SQLite
+    -- can't ALTER a CHECK). See _relax_jobs_kind_check for the one-time migration.
+    kind        TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'pending'
                 CHECK (status IN ('pending','running','done','error')),
     user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -207,6 +211,44 @@ def init_db():
                                "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(conn, "subjects", "teaching_notes",
                                "TEXT NOT NULL DEFAULT ''")
+        _relax_jobs_kind_check(conn)
+
+
+def _relax_jobs_kind_check(conn):
+    """Drop the obsolete CHECK enum on jobs.kind by rebuilding the table once.
+
+    The original `CHECK (kind IN (...))` had to be widened by hand every time a job
+    kind was added — SQLite can't ALTER a CHECK, only rebuild the table. Job kinds
+    are code-controlled and dispatched in jobs.run_job, so the enum bought no real
+    safety. Idempotent: runs only while the old constraint is still in the schema.
+
+    Foreign keys are toggled OFF for the swap so DROP TABLE jobs doesn't cascade
+    into `proposals` (which references jobs(id) ON DELETE CASCADE). Ids are
+    preserved, so proposals' references stay valid after the rename."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'").fetchone()
+    if not row or "CHECK (kind IN" not in (row["sql"] or ""):
+        return
+    conn.commit()  # leave any open transaction so PRAGMA foreign_keys can change
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript("""
+        CREATE TABLE jobs_new (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind        TEXT NOT NULL,
+            status      TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','running','done','error')),
+            user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            question_id INTEGER REFERENCES questions(id) ON DELETE CASCADE,
+            message     TEXT NOT NULL DEFAULT '',
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            finished_at TEXT
+        );
+        INSERT INTO jobs_new (id, kind, status, user_id, question_id, message, created_at, finished_at)
+            SELECT id, kind, status, user_id, question_id, message, created_at, finished_at FROM jobs;
+        DROP TABLE jobs;
+        ALTER TABLE jobs_new RENAME TO jobs;
+    """)
+    conn.execute("PRAGMA foreign_keys = ON")
 
 
 def _add_column_if_missing(conn, table, column, decl):
