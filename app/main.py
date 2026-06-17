@@ -7,6 +7,7 @@ on any device with no build step. Routes are grouped: identity, library
 import json
 import os
 import random
+from datetime import date, datetime, timezone
 from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
@@ -1007,7 +1008,34 @@ def history(request: Request):
             SELECT * FROM quiz_sessions WHERE user_id = ? AND finished_at IS NOT NULL
             ORDER BY finished_at DESC LIMIT 50
         """, (user["id"],))]
-    return render(request, "history.html", sessions=sessions)
+        # Summary is over ALL finished quizzes, not just the 50 most recent we list.
+        totals = conn.execute("""
+            SELECT COUNT(*) AS quizzes, COALESCE(SUM(correct), 0) AS correct,
+                   COALESCE(SUM(total), 0) AS answered
+            FROM quiz_sessions WHERE user_id = ? AND finished_at IS NOT NULL
+        """, (user["id"],)).fetchone()
+    summary = dict(totals)
+    summary["pct"] = (round(summary["correct"] / summary["answered"] * 100)
+                      if summary["answered"] else None)
+
+    # Bucket each session by a time label so the page reads as grouped runs
+    # instead of one undifferentiated list. Bucket on the SAME (UTC) date we
+    # display (finished_at[:10]) so the header can never disagree with the row.
+    today = datetime.now(timezone.utc).date()
+    for s in sessions:
+        d = date.fromisoformat(s["finished_at"][:10])
+        delta = (today - d).days
+        if delta <= 0:
+            s["bucket"] = "Today"
+        elif delta == 1:
+            s["bucket"] = "Yesterday"
+        elif delta < 7:
+            s["bucket"] = "Earlier this week"
+        elif d.year == today.year and d.month == today.month:
+            s["bucket"] = "Earlier this month"
+        else:
+            s["bucket"] = d.strftime("%B %Y")
+    return render(request, "history.html", sessions=sessions, summary=summary)
 
 
 # --------------------------------------------------------------------------

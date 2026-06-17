@@ -3,15 +3,34 @@
 {% block body %}
 <h1>{{ user.name }}'s history</h1>
 {% if sessions %}
+<div class="kpi-grid">
+  <div class="kpi">
+    <span class="kpi-num">{{ summary.quizzes }}</span>
+    <span class="kpi-label">Quizzes</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-num">{% if summary.pct is not none %}{{ summary.pct }}%{% else %}—{% endif %}</span>
+    <span class="kpi-label">Accuracy</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-num">{{ summary.answered }}</span>
+    <span class="kpi-label">Questions answered</span>
+  </div>
+</div>
+
 <div class="table-scroll">
 <table class="data">
   <tr><th>When</th><th>Topics</th><th>Score</th><th>%</th></tr>
   {% for s in sessions %}
+  {% if loop.changed(s.bucket) %}
+  <tr class="group-head"><td colspan="4">{{ s.bucket }}</td></tr>
+  {% endif %}
+  {% set pct = (s.correct / s.total * 100) if s.total else 0 %}
   <tr>
     <td class="muted nowrap">{{ s.finished_at[:10] }}<br><span class="small">{{ s.finished_at[11:16] }}</span></td>
     <td>{{ s.label }}</td>
     <td>{{ s.correct }}/{{ s.total }}</td>
-    <td>{{ (s.correct / s.total * 100)|round(0, 'floor') if s.total else 0 }}%</td>
+    <td><span class="score {{ 'good' if pct >= 80 else 'warn' if pct >= 60 else 'bad' }}">{{ pct|round(0, 'floor')|int }}%</span></td>
   </tr>
   {% endfor %}
 </table>

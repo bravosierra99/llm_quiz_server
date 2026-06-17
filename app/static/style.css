@@ -311,6 +311,22 @@ table.data th, table.data td { text-align: left; padding: .6rem .7rem; border-bo
 table.data th { color: var(--muted); font-weight: 650; font-size: .82rem; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
 table.data tr:hover td { background: var(--surface-2); }
 
+/* Time-bucket subheaders in the history table ("Today", "June 2026", …): a
+   light full-width band that breaks a long list into scannable runs. */
+table.data tr.group-head td {
+  background: var(--surface-2); color: var(--muted);
+  font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  padding: .5rem .7rem; border-bottom: 1px solid var(--border);
+}
+table.data tr.group-head:hover td { background: var(--surface-2); }
+
+/* Score-at-a-glance: colour the percentage so you can scan good/marginal/weak
+   runs without reading every number. */
+.score { font-weight: 700; }
+.score.good { color: var(--good); }
+.score.warn { color: var(--warn); }
+.score.bad  { color: var(--danger); }
+
 /* A wide multi-column table on a phone otherwise widens the whole document and
    clips everything (header, KPIs, banner). Wrapping it in .table-scroll keeps the
    page at viewport width — the table itself scrolls horizontally inside its card,
