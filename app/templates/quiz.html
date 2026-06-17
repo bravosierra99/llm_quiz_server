@@ -28,7 +28,10 @@
       </label>
       {% endfor %}
     </div>
-    <button type="submit" class="primary">Submit</button>
+    <div class="actions">
+      <button type="submit" class="primary">Submit</button>
+      <button type="submit" class="btn danger" name="dont_know" value="1" formnovalidate>I don't know</button>
+    </div>
   </form>
 
   {% else %}
@@ -38,7 +41,10 @@
       <textarea name="answer" rows="2" placeholder="Type your answer, then reveal"></textarea>
     </label>
     <input type="hidden" name="self_correct" id="self_correct" value="">
-    <button type="button" class="btn" id="reveal-btn" onclick="reveal()">Reveal answer</button>
+    <div class="actions" id="reveal-actions">
+      <button type="button" class="btn" id="reveal-btn" onclick="reveal()">Reveal answer</button>
+      <button type="submit" class="btn danger" name="dont_know" value="1" formnovalidate>I don't know</button>
+    </div>
 
     <div id="reveal-box" style="display:none">
       <p class="answer"><strong>Correct answer:</strong> {{ q.answer }}</p>

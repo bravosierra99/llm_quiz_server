@@ -578,7 +578,8 @@ def quiz_question(request: Request, session_id: int, idx: int):
 
 @app.post("/quiz/{session_id}/q/{idx}")
 def quiz_answer(request: Request, session_id: int, idx: int,
-                answer: str = Form(""), self_correct: str = Form("")):
+                answer: str = Form(""), self_correct: str = Form(""),
+                dont_know: str = Form("")):
     user, redirect = require_user(request)
     if redirect:
         return redirect
@@ -590,7 +591,13 @@ def quiz_answer(request: Request, session_id: int, idx: int,
         if idx >= len(qids):
             return RedirectResponse(f"/quiz/{session_id}/results", status_code=303)
         q = dict(conn.execute("SELECT * FROM questions WHERE id = ?", (qids[idx],)).fetchone())
-        if q["type"] == "short":
+        if dont_know == "1":
+            # "I don't know": grade as a miss outright — no guess, no chance of an
+            # accidental correct. Routes to the feedback screen (correct answer +
+            # explanation) like any other miss.
+            is_correct = 0
+            user_answer = answer.strip()
+        elif q["type"] == "short":
             # Self-graded flashcard style: the form already revealed the answer.
             is_correct = 1 if self_correct == "yes" else 0
             user_answer = answer.strip()
