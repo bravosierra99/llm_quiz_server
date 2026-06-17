@@ -1,17 +1,82 @@
 {% extends "base.html" %}
-{% block title %}Analytics · FleetQuiz{% endblock %}
+{% block title %}Analytics{% if scope_user %} · {{ scope_user.name }}{% endif %} · FleetQuiz{% endblock %}
 {% block body %}
+
+{% if scope_user %}
+<p class="quiz-nav"><a class="btn small" href="/analytics">← All learners</a></p>
+<h1>{{ scope_user.name }}{% if scope_user.is_admin %} ⭐{% endif %} · analytics</h1>
+<p class="muted">One learner's performance across their quizzes. Read-only — to act
+on their account, use the admin console.</p>
+{% else %}
 <h1>Analytics</h1>
-<p class="muted">Performance across everyone's quizzes. The adaptive scheduler
-already uses each person's recall to decide what to show next — this page is for
-<em>you</em>, to curate the question bank.</p>
+<p class="muted">Performance across everyone's quizzes. The adaptive scheduler already
+uses each person's recall to decide what to show next — this page is for <em>you</em>,
+to curate the bank and keep an eye on each learner.</p>
+{% endif %}
+
+{# Summary first: the numbers that matter, before any scrolling. #}
+<div class="kpi-grid">
+  <div class="kpi">
+    <span class="kpi-num">{% if overview.pct is not none %}{{ overview.pct }}%{% else %}—{% endif %}</span>
+    <span class="kpi-label">Accuracy</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-num">{{ overview.attempts }}</span>
+    <span class="kpi-label">Attempts</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-num">{{ overview.mastered }}</span>
+    <span class="kpi-label">Mastered</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-num">{{ overview.weak_count }}</span>
+    <span class="kpi-label">Struggle Qs</span>
+  </div>
+  {% if not scope_user %}
+  <div class="kpi">
+    <span class="kpi-num">{{ overview.learners }}</span>
+    <span class="kpi-label">Active learners</span>
+  </div>
+  {% endif %}
+  <div class="kpi">
+    <span class="kpi-num">{{ overview.flags }}</span>
+    <span class="kpi-label">Open flags</span>
+  </div>
+</div>
+
+{% if not scope_user %}
+{# Per-learner roster — the drill-down into one person's analytics. #}
+<div class="card">
+  <h2>Learners</h2>
+  <p class="muted">Each person's numbers. Open one to run analytics scoped to them.</p>
+  {% if users %}
+  <table class="data">
+    <tr><th>Name</th><th>Accuracy</th><th>Attempts</th><th>Mastered</th><th>Last active</th><th></th></tr>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.name }}{% if u.is_admin %} <span class="muted">⭐</span>{% endif %}</td>
+      <td>{% if u.pct is not none %}<strong>{{ u.pct }}%</strong> <span class="muted">({{ u.correct }}/{{ u.attempts }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>{{ u.attempts }}</td>
+      <td>{{ u.mastered }}</td>
+      <td class="muted">{{ u.last_active[:10] if u.last_active else '—' }}</td>
+      <td><a class="btn small" href="/analytics/user/{{ u.id }}">View →</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No learners yet.</p>
+  {% endif %}
+</div>
+{% endif %}
 
 <div class="card">
   <div class="row-between">
     <h2>Struggle questions</h2>
+    {% if not scope_user %}
     <form method="post" action="/analytics/ai-review">
       <button type="submit" class="btn">✨ AI review these</button>
     </form>
+    {% endif %}
   </div>
   <p class="muted">Questions answered at least 3 times and correct less than 60% of the time.</p>
   {% if weak %}
@@ -43,6 +108,7 @@ already uses each person's recall to decide what to show next — this page is f
 </div>
 {% endif %}
 
+{% if not scope_user %}
 <div class="card">
   <h2>🚩 Flagged for review</h2>
   <p class="muted">Questions someone flagged while quizzing. Resolve to clear.</p>
@@ -68,26 +134,41 @@ already uses each person's recall to decide what to show next — this page is f
   <p class="muted">No open flags.</p>
   {% endif %}
 </div>
+{% endif %}
 
-<h2>All questions by chapter</h2>
+{# The bank, collapsed. Subjects and chapters start closed with a one-line
+   rollup, so a 700-question bank is a short list of summaries until you open
+   the one you care about. #}
+<h2>{% if scope_user %}By chapter{% else %}All questions by chapter{% endif %}</h2>
 {% for s in subjects %}
-<h3 class="subject-head">{{ s.name }}</h3>
-{% for c in s.chapters %}
-<div class="card">
-  <h4><a href="/chapters/{{ c.id }}">{{ c.name }}</a></h4>
-  <table class="data">
-    <tr><th>Question</th><th>Type</th><th>Attempts</th><th>Correct</th></tr>
-    {% for q in c.questions %}
-    <tr class="{{ 'wrong-row' if q.weak else '' }}">
-      <td><a href="/questions/{{ q.qid }}/edit">{{ q.prompt }}</a></td>
-      <td><span class="pill type-{{ q.type }}">{{ q.type }}</span></td>
-      <td>{{ q.attempts }}</td>
-      <td>{% if q.pct is not none %}{{ q.pct }}% <span class="muted">({{ q.correct }}/{{ q.attempts }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-    </tr>
-    {% endfor %}
-  </table>
-</div>
-{% endfor %}
+<details class="subject-block">
+  <summary>
+    <span class="sum-name">{{ s.name }}</span>
+    <span class="sum-stat">{% if s.pct is not none %}{{ s.pct }}% · {{ s.attempts }} attempts{% else %}no attempts{% endif %}</span>
+  </summary>
+  {% for c in s.chapters %}
+  <details class="chapter-block">
+    <summary>
+      <span class="sum-name">{{ c.name }}</span>
+      <span class="sum-stat">
+        {{ c.total_q }} Qs · {% if c.pct is not none %}{{ c.pct }}%{% else %}—{% endif %}
+        {% if c.weak_count %}· <span class="weak-flag">{{ c.weak_count }} weak</span>{% endif %}
+      </span>
+    </summary>
+    <table class="data">
+      <tr><th>Question</th><th>Type</th><th>Attempts</th><th>Correct</th></tr>
+      {% for q in c.questions %}
+      <tr class="{{ 'wrong-row' if q.weak else '' }}">
+        <td><a href="/questions/{{ q.qid }}/edit">{{ q.prompt }}</a></td>
+        <td><span class="pill type-{{ q.type }}">{{ q.type }}</span></td>
+        <td>{{ q.attempts }}</td>
+        <td>{% if q.pct is not none %}{{ q.pct }}% <span class="muted">({{ q.correct }}/{{ q.attempts }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </details>
+  {% endfor %}
+</details>
 {% else %}
 <p class="muted">No questions yet.</p>
 {% endfor %}

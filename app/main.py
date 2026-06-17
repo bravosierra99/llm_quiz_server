@@ -1008,12 +1008,26 @@ def history(request: Request):
 # --------------------------------------------------------------------------
 # Admin analytics  (Phase 3)  +  optional AI review  (Phase 4)
 # --------------------------------------------------------------------------
-def _question_stats(conn):
-    """Per-question performance across all users, grouped by subject/chapter.
-    Every row in `answers` is a real attempt now, so no placeholder filtering is
-    needed. Returns (subjects, weak) where subjects is a nested structure for
-    rendering and weak is the flat list of struggle questions."""
-    rows = [dict(r) for r in conn.execute("""
+def _question_stats(conn, user_id=None):
+    """Per-question performance grouped by subject/chapter. Pass `user_id` to
+    scope attempts/correct to one learner (answers link to a user only through
+    `quiz_sessions`, so we filter on the answer's session owner); omit it for the
+    whole-fleet view. Every row in `answers` is a real attempt now, so no
+    placeholder filtering is needed.
+
+    Returns (subjects, weak): `subjects` is a nested subject→chapter→question
+    structure carrying chapter- and subject-level rollups for the collapsible
+    view; `weak` is the flat, worst-first list of struggle questions."""
+    # Scope the answer join to one learner's sessions when asked. Keeping it in
+    # the JOIN's ON (not a WHERE) preserves the LEFT JOIN so a question this user
+    # has never attempted still shows with attempts=0.
+    if user_id is None:
+        scope = ""
+        params = ()
+    else:
+        scope = "AND a.session_id IN (SELECT id FROM quiz_sessions WHERE user_id = ?)"
+        params = (user_id,)
+    rows = [dict(r) for r in conn.execute(f"""
         SELECT s.name AS subject, s.id AS subject_id,
                c.name AS chapter, c.id AS chapter_id, c.position AS cpos,
                q.id AS qid, q.prompt AS prompt, q.type AS type, q.answer AS answer,
@@ -1024,11 +1038,11 @@ def _question_stats(conn):
         FROM questions q
         JOIN chapters c ON q.chapter_id = c.id
         JOIN subjects s ON c.subject_id = s.id
-        LEFT JOIN answers a ON a.question_id = q.id
+        LEFT JOIN answers a ON a.question_id = q.id {scope}
         LEFT JOIN sources src ON q.source_id = src.id
         GROUP BY q.id
         ORDER BY s.name, c.position, c.id, q.id
-    """)]
+    """, params)]
     for r in rows:
         r["source_label"] = sources.label(
             {"kind": r["source_kind"], "title": r["source_title"],
@@ -1048,8 +1062,111 @@ def _question_stats(conn):
             chapters.append({"id": r["chapter_id"], "name": r["chapter"], "questions": []})
         chapters[-1]["questions"].append(r)
 
+    # Roll chapter and subject summaries up from the question rows, so the
+    # collapsed view can show "how's this chapter doing" without expanding it.
+    for s in subjects:
+        s_att = s_cor = 0
+        for c in s["chapters"]:
+            c["total_q"] = len(c["questions"])
+            c["attempts"] = sum(q["attempts"] for q in c["questions"])
+            c["correct"] = sum(q["correct"] for q in c["questions"])
+            c["weak_count"] = sum(1 for q in c["questions"] if q["weak"])
+            c["pct"] = round(100 * c["correct"] / c["attempts"]) if c["attempts"] else None
+            s_att += c["attempts"]
+            s_cor += c["correct"]
+        s["attempts"] = s_att
+        s["correct"] = s_cor
+        s["pct"] = round(100 * s_cor / s_att) if s_att else None
+
     weak = sorted((r for r in rows if r["weak"]), key=lambda r: r["pct"])
     return subjects, weak
+
+
+def _overview_stats(conn, user_id=None):
+    """Top-of-page KPI numbers. Whole-fleet by default, or scoped to one learner.
+    `weak_count` is filled in by the caller (it already has the weak list)."""
+    if user_id is None:
+        agg = conn.execute(
+            "SELECT COUNT(*) AS attempts, COALESCE(SUM(is_correct), 0) AS correct FROM answers"
+        ).fetchone()
+        learners = conn.execute(
+            "SELECT COUNT(DISTINCT user_id) AS c FROM quiz_sessions "
+            "WHERE id IN (SELECT session_id FROM answers)"
+        ).fetchone()["c"]
+        mastered = conn.execute(
+            "SELECT COUNT(*) AS c FROM review_state WHERE reps >= ? AND interval_days >= ?",
+            (scheduler.LEARNED_REPS, scheduler.MASTERED_INTERVAL_DAYS),
+        ).fetchone()["c"]
+        flags = conn.execute(
+            "SELECT COUNT(DISTINCT question_id) AS c FROM question_flags WHERE resolved_at IS NULL"
+        ).fetchone()["c"]
+    else:
+        agg = conn.execute(
+            "SELECT COUNT(*) AS attempts, COALESCE(SUM(a.is_correct), 0) AS correct "
+            "FROM answers a JOIN quiz_sessions s ON s.id = a.session_id WHERE s.user_id = ?",
+            (user_id,),
+        ).fetchone()
+        learners = None
+        mastered = conn.execute(
+            "SELECT COUNT(*) AS c FROM review_state WHERE user_id = ? AND reps >= ? AND interval_days >= ?",
+            (user_id, scheduler.LEARNED_REPS, scheduler.MASTERED_INTERVAL_DAYS),
+        ).fetchone()["c"]
+        flags = conn.execute(
+            "SELECT COUNT(DISTINCT question_id) AS c FROM question_flags "
+            "WHERE resolved_at IS NULL AND user_id = ?",
+            (user_id,),
+        ).fetchone()["c"]
+    attempts, correct = agg["attempts"], agg["correct"]
+    return {
+        "attempts": attempts,
+        "correct": correct,
+        "pct": round(100 * correct / attempts) if attempts else None,
+        "learners": learners,
+        "mastered": mastered,
+        "flags": flags,
+        "weak_count": 0,
+    }
+
+
+def _user_rollups(conn):
+    """One summary card per user for the fleet analytics page: attempts, accuracy,
+    questions mastered, and last activity. Drives the 'run analytics for them'
+    drill-down links."""
+    rows = [dict(r) for r in conn.execute(
+        """SELECT u.id AS id, u.name AS name, u.is_admin AS is_admin,
+                  COUNT(a.id) AS attempts,
+                  COALESCE(SUM(a.is_correct), 0) AS correct,
+                  MAX(a.answered_at) AS last_active,
+                  (SELECT COUNT(*) FROM review_state r
+                     WHERE r.user_id = u.id AND r.reps >= ? AND r.interval_days >= ?) AS mastered
+           FROM users u
+           LEFT JOIN quiz_sessions s ON s.user_id = u.id
+           LEFT JOIN answers a ON a.session_id = s.id
+           GROUP BY u.id
+           ORDER BY u.name""",
+        (scheduler.LEARNED_REPS, scheduler.MASTERED_INTERVAL_DAYS),
+    )]
+    for r in rows:
+        r["pct"] = round(100 * r["correct"] / r["attempts"]) if r["attempts"] else None
+    return rows
+
+
+def _analytics_context(conn, scope_user=None):
+    """Assemble everything analytics.html needs, fleet-wide or scoped to one
+    learner. The per-user view drops the fleet-only sections (flagged queue and
+    the per-user roster)."""
+    uid = scope_user["id"] if scope_user else None
+    overview = _overview_stats(conn, uid)
+    subjects, weak = _question_stats(conn, uid)
+    overview["weak_count"] = len(weak)
+    ctx = {"overview": overview, "subjects": subjects, "weak": weak, "scope_user": scope_user}
+    if scope_user is None:
+        ctx["flagged"] = _flagged_questions(conn)
+        ctx["users"] = _user_rollups(conn)
+    else:
+        ctx["flagged"] = None
+        ctx["users"] = None
+    return ctx
 
 
 def _flagged_questions(conn):
@@ -1073,10 +1190,24 @@ def analytics(request: Request):
     if redirect:
         return redirect
     with get_conn() as conn:
-        subjects, weak = _question_stats(conn)
-        flagged = _flagged_questions(conn)
-    return render(request, "analytics.html", subjects=subjects, weak=weak,
-                  flagged=flagged, ai_review=None)
+        ctx = _analytics_context(conn)
+    return render(request, "analytics.html", ai_review=None, **ctx)
+
+
+@app.get("/analytics/user/{user_id}", response_class=HTMLResponse)
+def analytics_user(request: Request, user_id: int):
+    """Same analytics page, scoped to one learner — 'run analytics for them'
+    without becoming them. Read-only oversight; account actions live in the admin
+    console (Phase 2)."""
+    admin, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    target = auth.get_user(user_id)
+    if not target:
+        return render(request, "forbidden.html", user=admin)
+    with get_conn() as conn:
+        ctx = _analytics_context(conn, scope_user=target)
+    return render(request, "analytics.html", ai_review=None, **ctx)
 
 
 @app.post("/analytics/ai-review", response_class=HTMLResponse)
@@ -1089,11 +1220,9 @@ def analytics_ai_review(request: Request):
     if redirect:
         return redirect
     with get_conn() as conn:
-        subjects, weak = _question_stats(conn)
-        flagged = _flagged_questions(conn)
-    ai_review = ai.review_results(weak)
-    return render(request, "analytics.html", subjects=subjects, weak=weak,
-                  flagged=flagged, ai_review=ai_review)
+        ctx = _analytics_context(conn)
+    ai_review = ai.review_results(ctx["weak"])
+    return render(request, "analytics.html", ai_review=ai_review, **ctx)
 
 
 # --------------------------------------------------------------------------

@@ -384,4 +384,37 @@ table.data tr:hover td { background: var(--surface-2); }
 .correct-row { border-left: 3px solid var(--good); }
 .wrong-row { border-left: 3px solid var(--danger); }
 
+/* --------------------------------------------------------------------------
+   Analytics: KPI summary + collapsible bank
+   -------------------------------------------------------------------------- */
+.kpi-grid {
+  display: grid; gap: .8rem; margin: 1rem 0 1.4rem;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+.kpi {
+  display: flex; flex-direction: column; gap: .15rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: .9rem 1rem; box-shadow: var(--shadow-sm);
+}
+.kpi-num { font-size: 1.7rem; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
+.kpi-label { font-size: .76rem; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+
+details.subject-block, details.chapter-block {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); margin: .6rem 0; overflow: hidden;
+}
+details.chapter-block { margin: .5rem 1rem; background: var(--surface-2); }
+details.subject-block > summary, details.chapter-block > summary {
+  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  cursor: pointer; padding: .7rem 1rem; font-weight: 600; list-style: none;
+}
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: "▸"; color: var(--muted); margin-right: .5rem; display: inline-block; transition: var(--ease); }
+details[open] > summary::before { transform: rotate(90deg); }
+details.subject-block > summary { font-size: 1.05rem; }
+details.chapter-block table.data { margin: .2rem 1rem 1rem; width: auto; min-width: calc(100% - 2rem); }
+.sum-name { flex: 1; }
+.sum-stat { color: var(--muted); font-size: .85rem; font-weight: 500; white-space: nowrap; }
+.weak-flag { color: var(--danger); font-weight: 650; }
+
 footer { text-align: center; padding: 2.5rem 1rem; font-size: .8rem; color: var(--muted); }
