@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Results · FleetQuiz{% endblock %}
 {% block body %}
+<div id="quiz-stage"
+     hx-target="#quiz-stage" hx-select="#quiz-stage" hx-swap="outerHTML" hx-push-url="true">
 {% set pct = (correct / total * 100)|round(0, 'floor') if total else 0 %}
 <h1>Results</h1>
 <div class="score-banner {{ 'good' if pct >= 80 else ('ok' if pct >= 50 else 'low') }}">
@@ -92,5 +94,6 @@
 <div class="actions">
   <a class="btn primary" href="/quiz">Another quiz</a>
   <a class="btn" href="/">Home</a>
+</div>
 </div>
 {% endblock %}

@@ -693,6 +693,22 @@ def quiz_answer(request: Request, session_id: int, idx: int,
         dest = f"/quiz/{session_id}/q/{idx + 1}" if has_next else f"/quiz/{session_id}/results"
     else:
         dest = f"/quiz/{session_id}/f/{idx}"
+    # htmx fast path: render the destination screen in THIS response instead of
+    # bouncing through a 303 + follow-up GET. The grading transaction above has
+    # already committed (the `with` block closed), so reusing the GET view here
+    # sees the just-recorded answer. htmx hx-selects #quiz-stage out of the page;
+    # HX-Push-Url keeps the address bar (and refresh/back) on a real URL. Non-htmx
+    # clients fall through to the classic PRG redirect — the no-JS path and the
+    # browser-back resubmit handling above both depend on that staying put.
+    if request.headers.get("HX-Request") == "true":
+        if is_correct and has_next:
+            resp = quiz_question(request, session_id, idx + 1)
+        elif is_correct:
+            resp = quiz_results(request, session_id)
+        else:
+            resp = quiz_feedback(request, session_id, idx)
+        resp.headers["HX-Push-Url"] = dest
+        return resp
     return RedirectResponse(dest, status_code=303)
 
 

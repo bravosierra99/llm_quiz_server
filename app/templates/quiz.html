@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Quiz · {{ idx + 1 }}/{{ total }}{% endblock %}
 {% block body %}
+{# The swap region for the in-place quiz flow. htmx attributes here are inherited
+   by the forms/links inside (hx-post/hx-get just name the URL); each swap replaces
+   this whole div with the next screen's #quiz-stage. Server still returns full
+   pages — htmx hx-selects this node out — so refresh / no-JS keep working. #}
+<div id="quiz-stage"
+     hx-target="#quiz-stage" hx-select="#quiz-stage" hx-swap="outerHTML" hx-push-url="true">
 {% if not session.endless %}
 <div class="progress"><div class="bar" style="width: {{ (idx / total * 100)|round(0, 'floor') }}%"></div></div>
 <p class="muted">Question {{ idx + 1 }} of {{ total }} · {{ session.label }}</p>
@@ -10,7 +16,8 @@
 
 {% if idx > 0 %}
 <p class="quiz-nav">
-  <a class="btn small" href="/quiz/{{ session.id }}/f/{{ idx - 1 }}">← Previous question</a>
+  <a class="btn small" href="/quiz/{{ session.id }}/f/{{ idx - 1 }}"
+     hx-get="/quiz/{{ session.id }}/f/{{ idx - 1 }}">← Previous question</a>
   <span class="muted small">review, flag, or generate more from the one you just answered</span>
 </p>
 {% endif %}
@@ -20,7 +27,8 @@
   <h2 class="prompt">{{ q.prompt }}</h2>
 
   {% if q.type in ['mcq', 'truefalse'] %}
-  <form method="post" action="/quiz/{{ session.id }}/q/{{ idx }}" class="stack">
+  <form method="post" action="/quiz/{{ session.id }}/q/{{ idx }}" class="stack"
+        hx-post="/quiz/{{ session.id }}/q/{{ idx }}">
     <div class="choice-list">
       {% for c in q.choices %}
       <label class="choice-option">
@@ -36,7 +44,8 @@
 
   {% else %}
   {# Short answer: self-graded flashcard. Type your answer, reveal, then grade. #}
-  <form method="post" action="/quiz/{{ session.id }}/q/{{ idx }}" class="stack" id="short-form">
+  <form method="post" action="/quiz/{{ session.id }}/q/{{ idx }}" class="stack" id="short-form"
+        hx-post="/quiz/{{ session.id }}/q/{{ idx }}">
     <label>Your answer
       <textarea name="answer" rows="2" placeholder="Type your answer, then reveal"></textarea>
     </label>
@@ -69,4 +78,5 @@
 <p class="muted end-quiz">
   <a href="/quiz/{{ session.id }}/results" onclick="return confirm('End the quiz and see results?')">End quiz</a>
 </p>
+</div>
 {% endblock %}

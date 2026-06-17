@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ 'Correct' if answer and answer.is_correct else 'Review' }} · FleetQuiz{% endblock %}
 {% block body %}
+<div id="quiz-stage"
+     hx-target="#quiz-stage" hx-select="#quiz-stage" hx-swap="outerHTML" hx-push-url="true">
 {% set correct = answer and answer.is_correct %}
 {% set back = '/quiz/' ~ session.id ~ '/f/' ~ idx %}
 
@@ -25,9 +27,11 @@
 
 <div class="actions feedback-actions">
   {% if has_next %}
-    <a class="btn primary" href="/quiz/{{ session.id }}/q/{{ idx + 1 }}">Next →</a>
+    <a class="btn primary" href="/quiz/{{ session.id }}/q/{{ idx + 1 }}"
+       hx-get="/quiz/{{ session.id }}/q/{{ idx + 1 }}">Next →</a>
   {% else %}
-    <a class="btn primary" href="/quiz/{{ session.id }}/results">See results →</a>
+    <a class="btn primary" href="/quiz/{{ session.id }}/results"
+       hx-get="/quiz/{{ session.id }}/results">See results →</a>
   {% endif %}
 
   <form method="post" action="/questions/{{ q.id }}/flag">
@@ -74,5 +78,6 @@
   {% endif %}
 
   <a class="btn" href="/quiz/{{ session.id }}/results">End quiz</a>
+</div>
 </div>
 {% endblock %}

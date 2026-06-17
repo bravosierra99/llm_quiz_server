@@ -17,6 +17,11 @@
   </script>
   <link rel="stylesheet" href="/static/style.css">
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <!-- htmx powers the in-place quiz swaps (no full-page reload between questions).
+       Every quiz form keeps its native method/action, so if this fails to load or
+       JS is off, the app falls straight back to the server-rendered POST→redirect
+       flow. -->
+  <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
 </head>
 <body>
 {% set path = request.url.path if request else '/' %}
@@ -77,9 +82,16 @@ function toggleTheme() {
 // Don't let a second action fire while one is still working: when any form inside
 // an action row submits, disable every button in that row (the submit itself still
 // goes through). Stops e.g. firing two tutor calls from the feedback screen.
+// Deferred one tick on purpose: a submit button that's disabled *during* the submit
+// event is dropped from the form data (native) and we don't want to race htmx's
+// serialization either — so we let the request capture its params first (incl. the
+// submitter, e.g. name="dont_know"), then lock the buttons before any human could
+// click again.
 document.addEventListener('submit', function (e) {
   var box = e.target.closest('.feedback-actions, .row-actions, .actions');
-  if (box) box.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+  if (box) setTimeout(function () {
+    box.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+  }, 0);
 }, true);
 </script>
 </body>

@@ -256,6 +256,15 @@ def get_conn():
     # Two family members answering at once can collide on a write; wait rather
     # than throwing "database is locked".
     conn.execute("PRAGMA busy_timeout = 5000")
+    # WAL lets readers proceed while a writer is mid-transaction (default rollback
+    # journal blocks them), so a quiz GET never stalls behind a background LLM job's
+    # write or another learner's answer. journal_mode persists in the DB file; we
+    # set it per-connection because it's a cheap no-op once already WAL.
+    # synchronous=NORMAL is the standard WAL pairing: durable across app crashes,
+    # and at worst loses the last transaction on a full OS/power crash (never
+    # corrupts) — an easy trade for a family study app.
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
     try:
         yield conn
         conn.commit()
