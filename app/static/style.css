@@ -433,6 +433,27 @@ table.data tr.group-head:hover td { background: var(--surface-2); }
 }
 .kpi-num { font-size: 1.7rem; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
 .kpi-label { font-size: .76rem; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+/* KPI cards that flag something to act on tint when non-zero, stay neutral at 0. */
+.kpi-warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.kpi-warn .kpi-num { color: var(--warn); }
+.kpi-bad  { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: var(--danger-soft); }
+.kpi-bad .kpi-num { color: var(--danger); }
+
+/* Section tabs on the analytics page (named to avoid the .tabs used elsewhere).
+   A button row that degrades to plain stacked sections without JS. */
+.tabbar { display: flex; flex-wrap: wrap; gap: .2rem; margin: 1.2rem 0 1.4rem; border-bottom: 1px solid var(--border); }
+.tabbar button {
+  background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: .55rem .85rem; font: inherit; font-weight: 600; color: var(--muted);
+  cursor: pointer; border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+.tabbar button:hover { color: var(--text); background: var(--surface-2); }
+.tabbar button.is-active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-badge {
+  display: inline-block; min-width: 1.3em; text-align: center; padding: 0 .35em;
+  margin-left: .35em; font-size: .7rem; line-height: 1.5; border-radius: 999px;
+  background: var(--danger-soft); color: var(--danger); font-weight: 700; vertical-align: middle;
+}
 
 details.subject-block, details.chapter-block {
   border: 1px solid var(--border); border-radius: var(--radius-sm);

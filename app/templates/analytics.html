@@ -6,177 +6,201 @@
 {% if scope_user %}
 <p class="quiz-nav"><a class="btn small" href="/analytics">← All learners</a></p>
 <h1>{{ scope_user.name }}{% if scope_user.is_admin %} ⭐{% endif %} · analytics</h1>
-<p class="muted">One learner's performance across their quizzes. Read-only — to act
-on their account, use the admin console.</p>
 {% else %}
 <h1>Analytics</h1>
-<p class="muted">Performance across everyone's quizzes. The adaptive scheduler already
-uses each person's recall to decide what to show next — this page is for <em>you</em>,
-to curate the bank and keep an eye on each learner.</p>
 {% endif %}
 
-{# Summary first: the numbers that matter, before any scrolling. #}
-<div class="kpi-grid">
-  <div class="kpi">
-    <span class="kpi-num">{% if overview.pct is not none %}{{ overview.pct }}%{% else %}—{% endif %}</span>
-    <span class="kpi-label">Accuracy</span>
-  </div>
-  <div class="kpi">
-    <span class="kpi-num">{{ overview.attempts }}</span>
-    <span class="kpi-label">Attempts</span>
-  </div>
-  <div class="kpi">
-    <span class="kpi-num">{{ overview.mastered }}</span>
-    <span class="kpi-label">Mastered</span>
-  </div>
-  <div class="kpi">
-    <span class="kpi-num">{{ overview.weak_count }}</span>
-    <span class="kpi-label">Struggle Qs</span>
-  </div>
-  {% if not scope_user %}
-  <div class="kpi">
-    <span class="kpi-num">{{ overview.learners }}</span>
-    <span class="kpi-label">Active learners</span>
-  </div>
-  {% endif %}
-  <div class="kpi">
-    <span class="kpi-num">{{ overview.flags }}</span>
-    <span class="kpi-label">Open flags</span>
-  </div>
-</div>
+{% set attention = (weak|length) + (flagged|length if flagged else 0) %}
 
-{% if not scope_user %}
-{# Per-learner roster — the drill-down into one person's analytics. #}
-<div class="card">
-  <h2>Learners</h2>
-  <p class="muted">Each person's numbers. Open one to run analytics scoped to them.</p>
-  {% if users %}
-  <div class="table-scroll">
-  <table class="data">
-    <tr><th>Name</th><th>Accuracy</th><th>Attempts</th><th>Mastered</th><th>Last active</th><th></th></tr>
-    {% for u in users %}
-    <tr>
-      <td>{{ u.name }}{% if u.is_admin %} <span class="muted">⭐</span>{% endif %}</td>
-      <td>{{ ui.score(u.pct, '(' ~ u.correct ~ '/' ~ u.attempts ~ ')') }}</td>
-      <td>{{ u.attempts }}</td>
-      <td>{{ u.mastered }}</td>
-      <td class="muted">{{ u.last_active[:10] if u.last_active else '—' }}</td>
-      <td><a class="btn small" href="/analytics/user/{{ u.id }}">View →</a></td>
-    </tr>
-    {% endfor %}
-  </table>
-  </div>
-  {% else %}
-  <p class="muted">No learners yet.</p>
-  {% endif %}
-</div>
-{% endif %}
-
-<div class="card">
-  <div class="row-between">
-    <h2>Struggle questions</h2>
-    {% if not scope_user %}
-    <form method="post" action="/analytics/ai-review">
-      <button type="submit" class="btn">✨ AI review these</button>
-    </form>
+{# Tabbed sections so a long admin page is a few short screens you tap between,
+   not one endless scroll. Degrades to "all sections visible" without JS (same
+   pattern as the nav): panels show by default; Alpine hides the inactive ones.
+   After an AI review we open straight on the tab that holds the result. #}
+<div x-data="{ tab: '{{ 'attention' if ai_review else 'overview' }}' }">
+  <div class="tabbar">
+    <button type="button" :class="{ 'is-active': tab==='overview' }" @click="tab='overview'">Overview</button>
+    {% if users %}
+    <button type="button" :class="{ 'is-active': tab==='learners' }" @click="tab='learners'">Learners</button>
     {% endif %}
+    <button type="button" :class="{ 'is-active': tab==='attention' }" @click="tab='attention'">Needs attention{% if attention %} <span class="tab-badge">{{ attention }}</span>{% endif %}</button>
+    <button type="button" :class="{ 'is-active': tab==='bank' }" @click="tab='bank'">Question bank</button>
   </div>
-  <p class="muted">Questions answered at least 3 times and correct less than 60% of the time.</p>
-  {% if weak %}
-  <div class="table-scroll">
-  <table class="data">
-    <tr><th>Chapter</th><th>Question</th><th>Type</th><th>Source</th><th>Correct</th></tr>
-    {% for q in weak %}
-    <tr>
-      <td class="muted">{{ q.chapter }}</td>
-      <td><a href="/questions/{{ q.qid }}/edit">{{ q.prompt }}</a></td>
-      <td><span class="pill type-{{ q.type }}">{{ q.type }}</span></td>
-      <td>{% if q.source_id %}<a href="/sources/{{ q.source_id }}" target="_blank">{{ q.source_label }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
-      <td><strong>{{ q.pct }}%</strong> <span class="muted">({{ q.correct }}/{{ q.attempts }})</span></td>
-    </tr>
-    {% endfor %}
-  </table>
-  </div>
-  {% else %}
-  <p class="muted">Nothing flagged yet — either the bank is healthy or there isn't enough quiz history.</p>
-  {% endif %}
-</div>
 
-{% if ai_review %}
-<div class="card">
-  <h2>AI review</h2>
-  {% if ai_review.ok %}
-    <pre class="ai-review">{{ ai_review.text }}</pre>
-  {% else %}
-    <p class="flash error">{{ ai_review.error }}</p>
-  {% endif %}
-</div>
-{% endif %}
+  {# ---- Overview ---- #}
+  <section x-show="tab==='overview'">
+    {% if scope_user %}
+    <p class="muted">One learner's performance across their quizzes. Read-only — to act
+    on their account, use the admin console.</p>
+    {% else %}
+    <p class="muted">Performance across everyone's quizzes. The adaptive scheduler already
+    uses each person's recall to decide what to show next — this page is for <em>you</em>,
+    to curate the bank and keep an eye on each learner.</p>
+    {% endif %}
 
-{% if not scope_user %}
-<div class="card">
-  <h2>🚩 Flagged for review</h2>
-  <p class="muted">Questions someone flagged while quizzing. Resolve to clear.</p>
-  {% if flagged %}
-  <div class="table-scroll">
-  <table class="data">
-    <tr><th>Chapter</th><th>Question</th><th>Type</th><th>Flags</th><th></th></tr>
-    {% for q in flagged %}
-    <tr>
-      <td class="muted">{{ q.chapter }}</td>
-      <td><a href="/questions/{{ q.qid }}/edit">{{ q.prompt }}</a>
-        {% if q.notes %}<br><span class="muted small">{{ q.notes }}</span>{% endif %}</td>
-      <td><span class="pill type-{{ q.type }}">{{ q.type }}</span></td>
-      <td><strong>{{ q.flags }}</strong></td>
-      <td>
-        <form method="post" action="/questions/{{ q.qid }}/flag/resolve">
-          <button type="submit" class="btn small">Resolve</button>
+    <div class="kpi-grid">
+      <div class="kpi">
+        <span class="kpi-num">{% if overview.pct is not none %}{{ overview.pct }}%{% else %}—{% endif %}</span>
+        <span class="kpi-label">Accuracy</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-num">{{ overview.attempts }}</span>
+        <span class="kpi-label">Attempts</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-num">{{ overview.mastered }}</span>
+        <span class="kpi-label">Mastered</span>
+      </div>
+      <div class="kpi {{ 'kpi-warn' if overview.weak_count else '' }}">
+        <span class="kpi-num">{{ overview.weak_count }}</span>
+        <span class="kpi-label">Struggle Qs</span>
+      </div>
+      {% if not scope_user %}
+      <div class="kpi">
+        <span class="kpi-num">{{ overview.learners }}</span>
+        <span class="kpi-label">Active learners</span>
+      </div>
+      {% endif %}
+      <div class="kpi {{ 'kpi-bad' if overview.flags else '' }}">
+        <span class="kpi-num">{{ overview.flags }}</span>
+        <span class="kpi-label">Open flags</span>
+      </div>
+    </div>
+  </section>
+
+  {# ---- Learners (fleet view only) ---- #}
+  {% if users %}
+  <section x-show="tab==='learners'">
+    <div class="card">
+      <h2>Learners</h2>
+      <p class="muted">Each person's numbers. Open one to run analytics scoped to them.</p>
+      <div class="table-scroll">
+      <table class="data">
+        <tr><th>Name</th><th>Accuracy</th><th>Attempts</th><th>Mastered</th><th>Last active</th><th></th></tr>
+        {% for u in users %}
+        <tr>
+          <td>{{ u.name }}{% if u.is_admin %} <span class="muted">⭐</span>{% endif %}</td>
+          <td>{{ ui.score(u.pct, '(' ~ u.correct ~ '/' ~ u.attempts ~ ')') }}</td>
+          <td>{{ u.attempts }}</td>
+          <td>{{ u.mastered }}</td>
+          <td class="muted">{{ u.last_active[:10] if u.last_active else '—' }}</td>
+          <td><a class="btn small" href="/analytics/user/{{ u.id }}">View →</a></td>
+        </tr>
+        {% endfor %}
+      </table>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {# ---- Needs attention: struggle questions, AI review, flagged ---- #}
+  <section x-show="tab==='attention'">
+    <div class="card">
+      <div class="row-between">
+        <h2>Struggle questions</h2>
+        {% if not scope_user %}
+        <form method="post" action="/analytics/ai-review">
+          <button type="submit" class="btn">✨ AI review these</button>
         </form>
-      </td>
-    </tr>
-    {% endfor %}
-  </table>
-  </div>
-  {% else %}
-  <p class="muted">No open flags.</p>
-  {% endif %}
-</div>
-{% endif %}
+        {% endif %}
+      </div>
+      <p class="muted">Questions answered at least 3 times and correct less than 60% of the time.</p>
+      {% if weak %}
+      <div class="table-scroll">
+      <table class="data">
+        <tr><th>Chapter</th><th>Question</th><th>Type</th><th>Source</th><th>Correct</th></tr>
+        {% for q in weak %}
+        <tr>
+          <td class="muted">{{ q.chapter }}</td>
+          <td><a href="/questions/{{ q.qid }}/edit">{{ q.prompt }}</a></td>
+          <td><span class="pill type-{{ q.type }}">{{ q.type }}</span></td>
+          <td>{% if q.source_id %}<a href="/sources/{{ q.source_id }}" target="_blank">{{ q.source_label }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td>{{ ui.score(q.pct, '(' ~ q.correct ~ '/' ~ q.attempts ~ ')') }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      </div>
+      {% else %}
+      <p class="muted">Nothing flagged yet — either the bank is healthy or there isn't enough quiz history.</p>
+      {% endif %}
+    </div>
 
-{# The bank, collapsed. Subjects and chapters start closed with a one-line
-   rollup, so a 700-question bank is a short list of summaries until you open
-   the one you care about. #}
-<h2>{% if scope_user %}By chapter{% else %}All questions by chapter{% endif %}</h2>
-{% for s in subjects %}
-<details class="subject-block">
-  <summary>
-    <span class="sum-name">{{ s.name }}</span>
-    <span class="sum-stat">{% if s.pct is not none %}{{ s.pct }}% · {{ s.attempts }} attempts{% else %}no attempts{% endif %}</span>
-  </summary>
-  {% for c in s.chapters %}
-  <details class="chapter-block">
-    <summary>
-      <span class="sum-name">{{ c.name }}</span>
-      <span class="sum-stat">
-        {{ c.total_q }} Qs · {% if c.pct is not none %}{{ c.pct }}%{% else %}—{% endif %}
-        {% if c.weak_count %}· <span class="weak-flag">{{ c.weak_count }} weak</span>{% endif %}
-      </span>
-    </summary>
-    <table class="data">
-      <tr><th>Question</th><th>Type</th><th>Attempts</th><th>Correct</th></tr>
-      {% for q in c.questions %}
-      <tr class="{{ 'wrong-row' if q.weak else '' }}">
-        <td><a href="/questions/{{ q.qid }}/edit">{{ q.prompt }}</a></td>
-        <td><span class="pill type-{{ q.type }}">{{ q.type }}</span></td>
-        <td>{{ q.attempts }}</td>
-        <td>{% if q.pct is not none %}{{ q.pct }}% <span class="muted">({{ q.correct }}/{{ q.attempts }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-      </tr>
+    {% if ai_review %}
+    <div class="card">
+      <h2>AI review</h2>
+      {% if ai_review.ok %}
+        <pre class="ai-review">{{ ai_review.text }}</pre>
+      {% else %}
+        <p class="flash error">{{ ai_review.error }}</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if not scope_user %}
+    <div class="card">
+      <h2>🚩 Flagged for review</h2>
+      <p class="muted">Questions someone flagged while quizzing. Resolve to clear.</p>
+      {% if flagged %}
+      <div class="table-scroll">
+      <table class="data">
+        <tr><th>Chapter</th><th>Question</th><th>Type</th><th>Flags</th><th></th></tr>
+        {% for q in flagged %}
+        <tr>
+          <td class="muted">{{ q.chapter }}</td>
+          <td><a href="/questions/{{ q.qid }}/edit">{{ q.prompt }}</a>
+            {% if q.notes %}<br><span class="muted small">{{ q.notes }}</span>{% endif %}</td>
+          <td><span class="pill type-{{ q.type }}">{{ q.type }}</span></td>
+          <td><strong>{{ q.flags }}</strong></td>
+          <td>
+            <form method="post" action="/questions/{{ q.qid }}/flag/resolve">
+              <button type="submit" class="btn small">Resolve</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      </div>
+      {% else %}
+      <p class="muted">No open flags.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </section>
+
+  {# ---- Question bank: subjects/chapters, collapsed ---- #}
+  <section x-show="tab==='bank'">
+    <h2>{% if scope_user %}By chapter{% else %}All questions by chapter{% endif %}</h2>
+    {% for s in subjects %}
+    <details class="subject-block">
+      <summary>
+        <span class="sum-name">{{ s.name }}</span>
+        <span class="sum-stat">{% if s.pct is not none %}{{ s.pct }}% · {{ s.attempts }} attempts{% else %}no attempts{% endif %}</span>
+      </summary>
+      {% for c in s.chapters %}
+      <details class="chapter-block">
+        <summary>
+          <span class="sum-name">{{ c.name }}</span>
+          <span class="sum-stat">
+            {{ c.total_q }} Qs · {% if c.pct is not none %}{{ c.pct }}%{% else %}—{% endif %}
+            {% if c.weak_count %}· <span class="weak-flag">{{ c.weak_count }} weak</span>{% endif %}
+          </span>
+        </summary>
+        <table class="data">
+          <tr><th>Question</th><th>Type</th><th>Attempts</th><th>Correct</th></tr>
+          {% for q in c.questions %}
+          <tr class="{{ 'wrong-row' if q.weak else '' }}">
+            <td><a href="/questions/{{ q.qid }}/edit">{{ q.prompt }}</a></td>
+            <td><span class="pill type-{{ q.type }}">{{ q.type }}</span></td>
+            <td>{{ q.attempts }}</td>
+            <td>{% if q.pct is not none %}{{ q.pct }}% <span class="muted">({{ q.correct }}/{{ q.attempts }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </table>
+      </details>
       {% endfor %}
-    </table>
-  </details>
-  {% endfor %}
-</details>
-{% else %}
-<p class="muted">No questions yet.</p>
-{% endfor %}
+    </details>
+    {% else %}
+    <p class="muted">No questions yet.</p>
+    {% endfor %}
+  </section>
+</div>
 {% endblock %}
