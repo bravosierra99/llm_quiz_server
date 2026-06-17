@@ -43,9 +43,7 @@
     </button>
     {% if user %}
       <span class="pill">{{ user.name }}{% if user.is_admin %} ⭐{% endif %}</span>
-      <a href="/logout" class="muted small">switch</a>
-    {% else %}
-      <a href="/who">Sign in</a>
+      <a href="/logout" class="muted small">Log out</a>
     {% endif %}
   </div>
 </header>

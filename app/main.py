@@ -51,7 +51,7 @@ def require_user(request):
     """Returns user dict or a RedirectResponse to the picker."""
     user = auth.current_user(request)
     if not user:
-        return None, RedirectResponse("/who", status_code=303)
+        return None, RedirectResponse("/cdn-cgi/access/logout", status_code=303)
     return user, None
 
 
@@ -65,7 +65,7 @@ def require_admin(request):
     from accidentally deleting content. See auth.py for the full security note."""
     user = auth.current_user(request)
     if not user:
-        return None, RedirectResponse("/who", status_code=303)
+        return None, RedirectResponse("/cdn-cgi/access/logout", status_code=303)
     if not user.get("is_admin"):
         return None, render(request, "forbidden.html", user=user)
     return user, None
@@ -74,32 +74,19 @@ def require_admin(request):
 # --------------------------------------------------------------------------
 # Identity
 # --------------------------------------------------------------------------
-@app.get("/who", response_class=HTMLResponse)
-def who(request: Request):
-    return render(request, "who.html", users=auth.list_users())
-
-
-@app.post("/who/pick")
-def who_pick(request: Request, user_id: int = Form(...)):
-    resp = RedirectResponse("/", status_code=303)
-    resp.set_cookie(auth.COOKIE_NAME, auth.sign_user_id(user_id), max_age=60 * 60 * 24 * 365,
-                    httponly=True, samesite="lax")
-    resp.delete_cookie(auth.ACT_COOKIE)  # switching profile drops any impersonation
-    return resp
-
-
-@app.post("/who/new")
-def who_new(request: Request, name: str = Form(...), email: str = Form("")):
-    u = auth.create_user(name, email or None)
-    resp = RedirectResponse("/", status_code=303)
-    resp.set_cookie(auth.COOKIE_NAME, auth.sign_user_id(u["id"]), max_age=60 * 60 * 24 * 365,
-                    httponly=True, samesite="lax")
-    return resp
-
-
+# Identity is established by Cloudflare Access (trusted email header) in front of
+# the app — see auth.py. There is deliberately no in-app profile picker / switcher:
+# behind the tunnel the CF header always wins over any cookie, so a picker can only
+# mislead. New profiles are created from the Admin console; an admin views a child's
+# account via Admin → "Act as". To change *who you are*, log out of Cloudflare.
 @app.get("/logout")
 def logout():
-    resp = RedirectResponse("/who", status_code=303)
+    """Real logout = ending the Cloudflare Access session. Clear our own cookies
+    (so any 'act as' is dropped), then hand off to Cloudflare's edge logout
+    endpoint, which re-prompts the CF login on the next visit. On a bare-LAN hit
+    with no CF Access in front, the cookie clear is the meaningful part and the
+    redirect simply 404s harmlessly."""
+    resp = RedirectResponse("/cdn-cgi/access/logout", status_code=303)
     resp.delete_cookie(auth.COOKIE_NAME)
     resp.delete_cookie(auth.ACT_COOKIE)
     return resp
