@@ -27,17 +27,34 @@ ADMIN_EMAILS = {
     e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()
 }
 COOKIE_NAME = "quiz_user"
+# Admin "act as" (impersonation): a SEPARATE signed cookie holding the user id an
+# admin is currently acting as. Its own salt means it can never be swapped for an
+# identity cookie, and — critically — it is only ever honoured when the REAL user
+# (resolved the normal way) is an admin. So setting it alone grants nothing.
+ACT_COOKIE = "quiz_act_as"
 _signer = URLSafeSerializer(SECRET_KEY, salt="quiz-user")
+_act_signer = URLSafeSerializer(SECRET_KEY, salt="quiz-act-as")
 
 
 def sign_user_id(user_id: int) -> str:
     return _signer.dumps(user_id)
 
 
+def sign_act_as(user_id: int) -> str:
+    return _act_signer.dumps(user_id)
+
+
 def _unsign(value: str):
     try:
         return _signer.loads(value)
     except (BadSignature, Exception):  # noqa: BLE001 - any tampering -> no user
+        return None
+
+
+def _unsign_act_as(value: str):
+    try:
+        return _act_signer.loads(value)
+    except (BadSignature, Exception):  # noqa: BLE001 - any tampering -> no impersonation
         return None
 
 
@@ -85,8 +102,10 @@ def get_user(user_id: int):
         return dict(row) if row else None
 
 
-def current_user(request):
-    """Resolve the current user from CF Access header or signed cookie."""
+def _resolve_real(request):
+    """The REAL signed-in identity — CF Access header first, then the signed
+    profile cookie. This is the only place identity is established; impersonation
+    layers on top of it and never replaces it."""
     email = request.headers.get("Cf-Access-Authenticated-User-Email")
     if email:
         return get_or_create_user_by_email(email)
@@ -96,3 +115,32 @@ def current_user(request):
         if uid is not None:
             return get_user(uid)
     return None
+
+
+def resolve(request):
+    """Resolve identity into {real, effective, acting}.
+
+    `effective` is who the app should behave as — the impersonated target when an
+    admin is acting as someone, otherwise the real user. The act-as cookie is
+    honoured ONLY when the real user is an admin, so a non-admin who plants the
+    cookie gets nothing. The app uses `effective` everywhere (so every existing
+    page just works as the target), while admin gating still flows through
+    `effective` too — meaning an admin who acts as a non-admin lives that
+    non-admin's restricted experience until they return."""
+    real = _resolve_real(request)
+    effective, acting = real, False
+    if real and real.get("is_admin"):
+        cookie = request.cookies.get(ACT_COOKIE)
+        if cookie:
+            tid = _unsign_act_as(cookie)
+            if tid is not None and tid != real["id"]:
+                target = get_user(tid)
+                if target:
+                    effective, acting = target, True
+    return {"real": real, "effective": effective, "acting": acting}
+
+
+def current_user(request):
+    """The effective user (impersonated target if an admin is acting as someone,
+    else the real user). Existing call sites get impersonation for free."""
+    return resolve(request)["effective"]

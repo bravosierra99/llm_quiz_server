@@ -417,4 +417,19 @@ details.chapter-block table.data { margin: .2rem 1rem 1rem; width: auto; min-wid
 .sum-stat { color: var(--muted); font-size: .85rem; font-weight: 500; white-space: nowrap; }
 .weak-flag { color: var(--danger); font-weight: 650; }
 
+/* Impersonation banner — sticky, hard to miss, so you always know you're
+   acting as someone and can get back in one click. */
+.impersonation-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  flex-wrap: wrap; padding: .6rem 1rem; font-size: .9rem; font-weight: 550;
+  background: var(--warn); color: #fff;
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 70%, #000);
+}
+.impersonation-banner strong { font-weight: 800; }
+.impersonation-banner .btn { background: rgba(255, 255, 255, .15); color: #fff; border-color: rgba(255, 255, 255, .55); }
+.impersonation-banner .btn:hover { background: #fff; color: var(--warn); border-color: #fff; }
+
+.admin-row-actions { margin-top: .9rem; padding-top: .9rem; border-top: 1px solid var(--border); gap: .5rem; }
+.checkbox-row { display: flex; align-items: center; gap: .5rem; font-weight: 500; }
+
 footer { text-align: center; padding: 2.5rem 1rem; font-size: .8rem; color: var(--muted); }

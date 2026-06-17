@@ -38,7 +38,10 @@ def _startup():
 
 
 def render(request, template, **ctx):
-    ctx.setdefault("user", auth.current_user(request))
+    info = auth.resolve(request)
+    ctx.setdefault("user", info["effective"])
+    ctx.setdefault("acting", info["acting"])
+    ctx.setdefault("real_user", info["real"])
     ctx["request"] = request
     return templates.TemplateResponse(template, ctx)
 
@@ -80,6 +83,7 @@ def who_pick(request: Request, user_id: int = Form(...)):
     resp = RedirectResponse("/", status_code=303)
     resp.set_cookie(auth.COOKIE_NAME, auth.sign_user_id(user_id), max_age=60 * 60 * 24 * 365,
                     httponly=True, samesite="lax")
+    resp.delete_cookie(auth.ACT_COOKIE)  # switching profile drops any impersonation
     return resp
 
 
@@ -96,6 +100,7 @@ def who_new(request: Request, name: str = Form(...), email: str = Form("")):
 def logout():
     resp = RedirectResponse("/who", status_code=303)
     resp.delete_cookie(auth.COOKIE_NAME)
+    resp.delete_cookie(auth.ACT_COOKIE)
     return resp
 
 
@@ -1223,6 +1228,137 @@ def analytics_ai_review(request: Request):
         ctx = _analytics_context(conn)
     ai_review = ai.review_results(ctx["weak"])
     return render(request, "analytics.html", ai_review=ai_review, **ctx)
+
+
+# --------------------------------------------------------------------------
+# Admin console — manage people, act as them, reset/delete their data
+# --------------------------------------------------------------------------
+# Identity model note: on the bare-LAN profile picker anyone could already pick
+# an admin profile (no passwords — see auth.py). So these controls are not a
+# security boundary; the safety here is the "are you sure" confirm gate the user
+# asked for, plus server-side guards against footguns (last admin, self-delete).
+@app.get("/admin/users", response_class=HTMLResponse)
+def admin_users(request: Request):
+    admin, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        users = _user_rollups(conn)
+        admin_count = conn.execute(
+            "SELECT COUNT(*) AS c FROM users WHERE is_admin = 1").fetchone()["c"]
+    return render(request, "admin_users.html", users=users, admin_count=admin_count)
+
+
+@app.post("/admin/users/new")
+def admin_new_user(request: Request, name: str = Form(...), email: str = Form(""),
+                   make_admin: str = Form("")):
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    if name.strip():
+        u = auth.create_user(name, email or None)
+        if make_admin == "1" and not u["is_admin"]:
+            with get_conn() as conn:
+                conn.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (u["id"],))
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/rename")
+def admin_rename_user(request: Request, user_id: int, name: str = Form(...)):
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    name = name.strip()
+    if name:
+        with get_conn() as conn:
+            conn.execute("UPDATE users SET name = ? WHERE id = ?", (name, user_id))
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/toggle-admin")
+def admin_toggle_admin(request: Request, user_id: int):
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        target = conn.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
+        if target:
+            if target["is_admin"]:
+                # Never strip the last admin — it would lock everyone out of admin.
+                cnt = conn.execute(
+                    "SELECT COUNT(*) AS c FROM users WHERE is_admin = 1").fetchone()["c"]
+                if cnt > 1:
+                    conn.execute("UPDATE users SET is_admin = 0 WHERE id = ?", (user_id,))
+            else:
+                conn.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (user_id,))
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/reset")
+def admin_reset_user(request: Request, user_id: int):
+    """Wipe a learner's STUDY state (sessions, answers, recall, flags, tutor
+    chats) but keep their profile and subject enrollment. Sessions cascade to
+    answers + session_questions via FK (foreign_keys=ON in get_conn)."""
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        conn.execute("DELETE FROM quiz_sessions WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM review_state WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM question_flags WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM tutor_messages WHERE user_id = ?", (user_id,))
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/delete")
+def admin_delete_user(request: Request, user_id: int):
+    """Remove a profile entirely. One DELETE — `users` FK cascades wipe their
+    sessions, answers, recall state, flags and tutor chats."""
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    # Guard against the REAL signed-in admin, not the effective user — otherwise
+    # an admin who is "acting as" a fellow admin could delete their own account.
+    real = auth.resolve(request)["real"]
+    resp = RedirectResponse("/admin/users", status_code=303)
+    if real and user_id == real["id"]:
+        return resp  # never delete yourself
+    with get_conn() as conn:
+        target = conn.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
+        if target:
+            if target["is_admin"]:
+                cnt = conn.execute(
+                    "SELECT COUNT(*) AS c FROM users WHERE is_admin = 1").fetchone()["c"]
+                if cnt <= 1:
+                    return resp  # don't delete the last admin
+            conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    resp.delete_cookie(auth.ACT_COOKIE)  # in case we were acting as them
+    return resp
+
+
+@app.post("/admin/act-as/{user_id}")
+def admin_act_as(request: Request, user_id: int):
+    """Become another user — every page then renders as them, with a banner to
+    return. Reuses the whole app rather than building per-user control forms."""
+    admin, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    target = auth.get_user(user_id)
+    resp = RedirectResponse("/", status_code=303)
+    if target and target["id"] != admin["id"]:
+        resp.set_cookie(auth.ACT_COOKIE, auth.sign_act_as(user_id),
+                        max_age=60 * 60 * 8, httponly=True, samesite="lax")
+    return resp
+
+
+@app.post("/admin/stop-acting")
+def admin_stop_acting(request: Request):
+    """Drop impersonation and return to the admin's own identity. Not admin-gated:
+    it only clears the act-as cookie (the real admin cookie is untouched), so it
+    works even while the effective user is the non-admin being impersonated."""
+    resp = RedirectResponse("/admin/users", status_code=303)
+    resp.delete_cookie(auth.ACT_COOKIE)
+    return resp
 
 
 # --------------------------------------------------------------------------

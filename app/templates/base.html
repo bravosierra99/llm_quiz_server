@@ -30,6 +30,7 @@
     <a href="/history" class="{{ 'active' if path.startswith('/history') else '' }}">History</a>
     {% if user and user.is_admin %}
     <a href="/analytics" class="{{ 'active' if path.startswith('/analytics') else '' }}">Analytics</a>
+    <a href="/admin/users" class="{{ 'active' if path.startswith('/admin') else '' }}">Admin</a>
     <a href="/review" class="{{ 'active' if path.startswith('/review') else '' }}">Review</a>
     <a href="/import" class="{{ 'active' if path.startswith('/import') else '' }}">Import</a>
     {% endif %}
@@ -47,6 +48,14 @@
     {% endif %}
   </div>
 </header>
+{% if acting %}
+<div class="impersonation-banner">
+  <span>👤 Acting as <strong>{{ user.name }}</strong>{% if real_user %} — you're signed in as {{ real_user.name }}{% endif %}. You see exactly what they see.</span>
+  <form method="post" action="/admin/stop-acting">
+    <button type="submit" class="btn small">↩ Return to admin</button>
+  </form>
+</div>
+{% endif %}
 <main>
   {% block body %}{% endblock %}
 </main>

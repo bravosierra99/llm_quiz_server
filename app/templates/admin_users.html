@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Admin · People · FleetQuiz{% endblock %}
+{% block body %}
+<h1>People</h1>
+<p class="muted">Manage every profile. <strong>Act as</strong> someone to control their
+experience hands-on (you'll see exactly what they see, with a banner to return);
+<strong>Analytics</strong> opens their numbers read-only. Destructive actions ask first.</p>
+
+{% for u in users %}
+<div class="card">
+  <div class="row-between">
+    <div>
+      <h3 style="margin:0">{{ u.name }}{% if u.is_admin %} ⭐{% endif %}{% if u.id == real_user.id %} <span class="muted small">(you)</span>{% endif %}</h3>
+      <p class="muted small" style="margin:.25rem 0 0">
+        {% if u.pct is not none %}{{ u.pct }}% · {{ u.attempts }} attempts{% else %}no attempts yet{% endif %}
+        · {{ u.mastered }} mastered · last active {{ u.last_active[:10] if u.last_active else '—' }}
+      </p>
+    </div>
+    <div class="actions">
+      <a class="btn small" href="/analytics/user/{{ u.id }}">📊 Analytics</a>
+      {% if u.id != real_user.id %}
+      <form method="post" action="/admin/act-as/{{ u.id }}">
+        <button type="submit" class="btn small">👤 Act as</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="actions admin-row-actions">
+    <form method="post" action="/admin/users/{{ u.id }}/rename" class="actions">
+      <input name="name" value="{{ u.name }}" aria-label="Name" style="width:auto">
+      <button type="submit" class="btn small">Rename</button>
+    </form>
+
+    <form method="post" action="/admin/users/{{ u.id }}/toggle-admin">
+      {% if u.is_admin and admin_count <= 1 %}
+      <button type="button" class="btn small" disabled title="Can't remove the only admin">Revoke admin</button>
+      {% else %}
+      <button type="submit" class="btn small">{{ 'Revoke admin' if u.is_admin else 'Make admin' }}</button>
+      {% endif %}
+    </form>
+
+    <form method="post" action="/admin/users/{{ u.id }}/reset">
+      <button type="submit" class="btn small danger"
+              onclick='return confirm("Reset ALL study progress for " + {{ u.name|tojson }} + "? Their sessions, recall state and flags are erased. This cannot be undone.")'>
+        Reset progress
+      </button>
+    </form>
+
+    {% if u.id != real_user.id and not (u.is_admin and admin_count <= 1) %}
+    <form method="post" action="/admin/users/{{ u.id }}/delete">
+      <button type="submit" class="btn small danger"
+              onclick='return confirm("Delete " + {{ u.name|tojson }} + " entirely? Their profile and ALL their data are removed for good.")'>
+        Delete
+      </button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+
+<div class="card">
+  <h3>Add a person</h3>
+  <form method="post" action="/admin/users/new" class="stack">
+    <label>Name <input name="name" required placeholder="e.g. Maya"></label>
+    <label>Email <span class="muted">(optional — only used for admins via SSO)</span>
+      <input name="email" type="email" placeholder="optional"></label>
+    <label class="checkbox-row"><input type="checkbox" name="make_admin" value="1" style="width:auto"> Make this person an admin</label>
+    <button type="submit" class="primary">Create profile</button>
+  </form>
+</div>
+{% endblock %}
