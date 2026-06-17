@@ -50,6 +50,7 @@ to curate the bank and keep an eye on each learner.</p>
   <h2>Learners</h2>
   <p class="muted">Each person's numbers. Open one to run analytics scoped to them.</p>
   {% if users %}
+  <div class="table-scroll">
   <table class="data">
     <tr><th>Name</th><th>Accuracy</th><th>Attempts</th><th>Mastered</th><th>Last active</th><th></th></tr>
     {% for u in users %}
@@ -63,6 +64,7 @@ to curate the bank and keep an eye on each learner.</p>
     </tr>
     {% endfor %}
   </table>
+  </div>
   {% else %}
   <p class="muted">No learners yet.</p>
   {% endif %}
@@ -80,6 +82,7 @@ to curate the bank and keep an eye on each learner.</p>
   </div>
   <p class="muted">Questions answered at least 3 times and correct less than 60% of the time.</p>
   {% if weak %}
+  <div class="table-scroll">
   <table class="data">
     <tr><th>Chapter</th><th>Question</th><th>Type</th><th>Source</th><th>Correct</th></tr>
     {% for q in weak %}
@@ -92,6 +95,7 @@ to curate the bank and keep an eye on each learner.</p>
     </tr>
     {% endfor %}
   </table>
+  </div>
   {% else %}
   <p class="muted">Nothing flagged yet — either the bank is healthy or there isn't enough quiz history.</p>
   {% endif %}
@@ -113,6 +117,7 @@ to curate the bank and keep an eye on each learner.</p>
   <h2>🚩 Flagged for review</h2>
   <p class="muted">Questions someone flagged while quizzing. Resolve to clear.</p>
   {% if flagged %}
+  <div class="table-scroll">
   <table class="data">
     <tr><th>Chapter</th><th>Question</th><th>Type</th><th>Flags</th><th></th></tr>
     {% for q in flagged %}
@@ -130,6 +135,7 @@ to curate the bank and keep an eye on each learner.</p>
     </tr>
     {% endfor %}
   </table>
+  </div>
   {% else %}
   <p class="muted">No open flags.</p>
   {% endif %}

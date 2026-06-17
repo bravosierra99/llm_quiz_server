@@ -111,6 +111,10 @@ body {
   color: var(--text);
   font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* Last-resort: let the browser break inside an over-long unbreakable token
+     (a pasted URL, a 40-char word in a prompt) so it can't poke past the edge
+     on a narrow phone. Invisible for normal text. */
+  overflow-wrap: break-word;
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -121,6 +125,7 @@ h3 { font-size: 1.05rem; font-weight: 650; margin: 0 0 .5rem; }
 p { margin: .6rem 0; }
 .muted { color: var(--muted); }
 .small { font-size: .85rem; }
+.nowrap { white-space: nowrap; }
 code {
   background: var(--surface-2); padding: .12rem .38rem; border-radius: 6px;
   font-size: .85em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -296,8 +301,15 @@ button:disabled, .btn:disabled { opacity: .55; cursor: default; transform: none;
    -------------------------------------------------------------------------- */
 table.data { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 table.data th, table.data td { text-align: left; padding: .6rem .7rem; border-bottom: 1px solid var(--border); }
-table.data th { color: var(--muted); font-weight: 650; font-size: .82rem; text-transform: uppercase; letter-spacing: .03em; }
+table.data th { color: var(--muted); font-weight: 650; font-size: .82rem; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
 table.data tr:hover td { background: var(--surface-2); }
+
+/* A wide multi-column table on a phone otherwise widens the whole document and
+   clips everything (header, KPIs, banner). Wrapping it in .table-scroll keeps the
+   page at viewport width — the table itself scrolls horizontally inside its card,
+   with comfortable full-width columns you swipe instead of crushed wrapped ones. */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.table-scroll > table.data { margin-top: .5rem; }
 
 /* --------------------------------------------------------------------------
    Question lists (review/results)

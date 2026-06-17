@@ -57,15 +57,17 @@
 
 {% if recent %}
 <h2>Your recent quizzes</h2>
+<div class="table-scroll">
 <table class="data">
   <tr><th>When</th><th>Topics</th><th>Score</th></tr>
   {% for r in recent %}
   <tr>
-    <td class="muted">{{ r.finished_at }}</td>
+    <td class="muted nowrap">{{ r.finished_at[:10] }}<br><span class="small">{{ r.finished_at[11:16] }}</span></td>
     <td>{{ r.label }}</td>
     <td>{{ r.correct }}/{{ r.total }}</td>
   </tr>
   {% endfor %}
 </table>
+</div>
 {% endif %}
 {% endblock %}
