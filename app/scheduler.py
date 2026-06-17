@@ -3,8 +3,11 @@
 Deterministic arithmetic, no LLM. Two jobs:
 
   * `grade()` — update a user's recall state for one question after an attempt.
-  * `select_question_ids()` — choose which questions a quiz should contain,
-    prioritising what's due over what's new over what's not yet due.
+  * `select_question_ids()` — choose which questions a quiz should contain.
+    Coverage-first: never-seen questions lead and fill the quiz before any
+    already-seen card is re-served; reviews (due, then not-yet-due) fill the
+    remainder. A freshly-missed card is held out by intervening volume so it
+    never leads (see RELEARN_*).
 
 We use a binary signal (correct / incorrect) rather than SM-2's 0–5 quality
 scale, because the app only ever knows "got it" or "missed it". That's the
@@ -34,11 +37,6 @@ EASE_PENALTY = 0.2          # ease lost on a miss
 RELEARN_FRACTION = 0.4   # come back after seeing ~40% of the still-unseen pool
 RELEARN_FLOOR = 15       # ...but never within ~a session, even when little is unseen
 RELEARN_CAP = 200        # ...and never buried forever on a huge bank
-
-# How many brand-new questions to introduce in a single quiz. Without a cap, a
-# fresh chapter would dump dozens of new cards at once and nothing would get the
-# spaced repetition that makes any of this work.
-NEW_CARDS_PER_SESSION = 20
 
 # A question counts as "learned"/mastered for a user once it has survived a
 # couple of recalls AND reached a long interval.
@@ -198,16 +196,23 @@ def select_question_ids(conn, user_id, chapter_ids, limit, order="adaptive", exc
 
     # Randomise within each tier: a random sample across the pooled chapters is
     # drawn in proportion to each chapter's question count, and the lead-off
-    # questions vary from quiz to quiz. Spaced-repetition priority is preserved at
-    # the tier level. A relearn card that has served its gap rejoins the due tier;
-    # one still waiting is held to the very back — a last resort that only gets
-    # served if there's genuinely nothing fresh left to ask.
+    # questions vary from quiz to quiz. A relearn card that has served its gap
+    # rejoins the due tier; one still waiting is held to the very back — a last
+    # resort that only gets served if there's genuinely nothing fresh left to ask.
     due += relearn_ready
     random.shuffle(due)
     random.shuffle(new)
     random.shuffle(future)
     random.shuffle(relearn_waiting)
-    ordered = due + new[:NEW_CARDS_PER_SESSION] + future + relearn_waiting
+    # COVERAGE-FIRST ordering: never-seen questions lead and fill the quiz before
+    # ANY already-seen card is re-served, so you work through the whole bank once
+    # before reviews begin. (This deliberately overrides classic SRS "due-first":
+    # appending new *after* due let a review backlog the size of a quiz bury every
+    # new card, so fresh material never appeared.) Reviews — due, then not-yet-due
+    # — fill whatever room is left after new is exhausted; relearn-waiting misses
+    # stay dead last so a miss still never leads (see RELEARN_*). No per-session
+    # new-card cap: in coverage mode a cap would just re-bury new behind reviews.
+    ordered = new + due + future + relearn_waiting
     return ordered[:limit]
 
 
