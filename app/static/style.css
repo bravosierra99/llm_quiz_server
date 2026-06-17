@@ -163,8 +163,15 @@ code {
 .nav-toggle { display: none; }
 
 @media (max-width: 640px) {
-  .topbar { flex-wrap: wrap; gap: .6rem 1rem; }
-  .nav-toggle { display: inline-flex; }
+  /* A long username makes brand + hamburger + theme + pill + switch too wide for
+     one row, so the whole account cluster used to drop to a second row and
+     right-align — orphaned, with a dead gap beside the hamburger. Instead, lay
+     the header out as two intentional rows:
+       row 1:  brand ......................... ☰
+       row 2:  account cluster (theme · name · switch), right-aligned
+     and the nav menu, when opened, drops in full-width below that. */
+  .topbar { flex-wrap: wrap; gap: .5rem 1rem; }
+  .nav-toggle { display: inline-flex; margin-left: auto; }
   /* Degrade to visible: the nav shows by default, and JS *collapses* it (adds
      .nav-collapsed). If Alpine never loads — CDN blocked, offline homelab — the
      class is never applied and the nav stays visible (usable, just not
@@ -175,7 +182,7 @@ code {
     padding-top: .4rem; border-top: 1px solid var(--border);
   }
   .topbar nav.nav-collapsed { display: none; }
-  .topbar .who { margin-left: auto; }
+  .topbar .who { order: 2; flex-basis: 100%; justify-content: flex-end; margin-left: 0; }
 }
 
 /* --------------------------------------------------------------------------
