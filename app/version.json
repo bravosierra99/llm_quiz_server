@@ -1,10 +1,10 @@
 {
-  "version": "0.1.0",
-  "commit": "82ee5bf159b48c426a81710cbc9ff65b4cc987ea",
-  "commit_short": "82ee5bf",
+  "version": "0.1.1",
+  "commit": "99633c15b25da750be8206017b36ba051b499887",
+  "commit_short": "99633c1",
   "branch": "main",
   "clean": false,
-  "commit_message": "build: add semver versioning (pyproject + bump/generate scripts, surfaced)",
-  "commit_date": "2026-06-17 16:35:01 -0400",
-  "build_date": "2026-06-17T17:04:58-04:00"
+  "commit_message": "fix(tutor): seed lessons via fetch, not a blocking full-page POST",
+  "commit_date": "2026-06-17 20:09:39 -0400",
+  "build_date": "2026-06-17T20:15:01-04:00"
 }

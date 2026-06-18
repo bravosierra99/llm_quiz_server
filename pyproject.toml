@@ -1,6 +1,6 @@
 [project]
 name = "fleetquiz"
-version = "0.1.0"  # bumped by scripts/version-bump.sh; first release is v0.1.0
+version = "0.1.1"  # bumped by scripts/version-bump.sh; first release is v0.1.0
 description = "FleetQuiz — a self-hosted family study-quiz app (FastAPI + SQLite)."
 requires-python = ">=3.12"
 # Runtime deps are pinned in requirements.txt (the Dockerfile and `uv run
