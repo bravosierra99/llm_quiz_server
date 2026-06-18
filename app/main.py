@@ -8,7 +8,7 @@ import json
 import os
 import random
 from datetime import date, datetime, timedelta, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
@@ -969,15 +969,28 @@ def save_teaching_notes(request: Request, subject_id: int,
 
 @app.post("/questions/{question_id}/tutor")
 def tutor_start(request: Request, question_id: int, mode: str = Form("teach"),
-                session_id: str = Form(""), back: str = Form("/")):
-    """Seed a tutor thread from a quiz screen ('Why was I wrong?' / 'Teach me')."""
+                session_id: str = Form(""), back: str = Form("/"),
+                inline: str = Form("")):
+    """Seed a tutor thread from a quiz screen ('Why was I wrong?' / 'Teach me').
+
+    The seed runs a slow (~1-2 min) model call. A full-page POST that blocks that
+    long is fragile on mobile — backgrounding the app kills the in-flight navigation
+    and a Safari reload then GETs this POST-only URL (405). So the default path
+    redirects to the thread INSTANTLY and lets the page fire the seed via fetch
+    (Accept: application/json), exactly like the follow-up `ask` does. The blocking
+    seed still happens for that fetch and for the no-JS <noscript> fallback (inline=1).
+    """
     user, redirect = require_user(request)
     if redirect:
         return redirect
+    wants_json = "application/json" in request.headers.get("accept", "")
     intent = TUTOR_INTENTS.get(mode, TUTOR_INTENTS["teach"])
     with get_conn() as conn:  # load + CLOSE before the slow model call
         ctx = _tutor_context_row(conn, question_id)
         if not ctx:
+            if wants_json:
+                return JSONResponse({"ok": False, "error": "question not found"},
+                                    status_code=404)
             return RedirectResponse(_safe_back(back), status_code=303)
         learner_answer = None
         if mode == "why_wrong" and session_id.isdigit():
@@ -988,15 +1001,42 @@ def tutor_start(request: Request, question_id: int, mode: str = Form("teach"),
         has_thread = conn.execute(
             "SELECT 1 FROM tutor_messages WHERE user_id = ? AND question_id = ? LIMIT 1",
             (user["id"], question_id)).fetchone() is not None
-    # If a thread already exists for this question, just open it — don't stack
-    # another canned intro (and don't fire a second model call). Follow-ups happen
-    # in the chat itself.
-    if not has_thread:
-        block = _tutor_context_block(ctx, learner_answer)
-        reply = _tutor_call(block, [], intent)
-        with get_conn() as conn:
-            _store_tutor(conn, user["id"], question_id, intent, reply)
+
+    # Default full-page submit (from a quiz screen): bounce straight to the thread —
+    # no model call on this hop — and let the page seed via fetch. If a thread already
+    # exists, just open it (no `seed` param, no re-seed).
+    if not wants_json and not inline:
+        dest = _tutor_url(question_id, back)
+        if not has_thread:
+            params = {"seed": mode}
+            if session_id.isdigit():
+                params["session_id"] = session_id
+            dest += ("&" if "?" in dest else "?") + urlencode(params)
+        return RedirectResponse(dest, status_code=303)
+
+    # Actually run the seed (the thread page's fetch, or the no-JS inline form). If a
+    # thread already exists, don't stack another canned intro or fire a second call —
+    # follow-ups happen in the chat itself.
+    if has_thread:
+        if wants_json:
+            return JSONResponse({"ok": True, "skipped": True})
+        return RedirectResponse(_tutor_url(question_id, back), status_code=303)
+    block = _tutor_context_block(ctx, learner_answer)
+    reply = _tutor_call(block, [], intent)
+    with get_conn() as conn:
+        _store_tutor(conn, user["id"], question_id, intent, reply)
+    if wants_json:
+        return JSONResponse({"ok": True, "user": intent, "reply": reply})
     return RedirectResponse(_tutor_url(question_id, back), status_code=303)
+
+
+@app.get("/questions/{question_id}/tutor")
+def tutor_start_get(request: Request, question_id: int):
+    """A GET here means a stale reload of the POST-only seed URL (e.g. Safari
+    re-issuing the navigation after the app was backgrounded). Never 405 — just open
+    the thread, which the original POST has very likely already seeded."""
+    return RedirectResponse(
+        _tutor_url(question_id, request.query_params.get("back", "")), status_code=303)
 
 
 @app.get("/tutor/{question_id}", response_class=HTMLResponse)
@@ -1011,10 +1051,18 @@ def tutor_thread(request: Request, question_id: int):
         messages = [dict(r) for r in conn.execute(
             "SELECT role, content FROM tutor_messages WHERE user_id = ? AND question_id = ? "
             "ORDER BY id", (user["id"], question_id))]
+    # An empty thread reached with ?seed=<mode> should auto-seed via fetch (set up by
+    # the instant redirect in tutor_start). Hand the template the mode, the matching
+    # canned intent text (so it can echo the 'You' bubble to match a reload render),
+    # and any session_id the why_wrong seed needs.
+    seed_mode = request.query_params.get("seed") if not messages else None
     return render(request, "tutor.html", q=ctx, messages=messages,
                   question_id=question_id, back=request.query_params.get("back", ""),
                   is_admin=bool(user.get("is_admin")),
-                  queued=request.query_params.get("queued") == "1")
+                  queued=request.query_params.get("queued") == "1",
+                  seed_mode=seed_mode if seed_mode in TUTOR_INTENTS else None,
+                  seed_intent=TUTOR_INTENTS.get(seed_mode),
+                  seed_session_id=request.query_params.get("session_id", ""))
 
 
 @app.post("/tutor/{question_id}/ask")

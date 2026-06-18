@@ -25,6 +25,23 @@
   {% endfor %}
 </div>
 
+{% if seed_mode %}
+{# Auto-seed: the quiz-screen button redirected here instantly; the script below fires
+   the (slow) seed via fetch and streams a 'Thinking…' bubble, so there's no minutes-long
+   full-page POST to interrupt. <noscript> is the JS-off fallback (a normal blocking POST). #}
+<div id="tutor-seed" data-mode="{{ seed_mode }}" data-session="{{ seed_session_id }}"
+     data-intent="{{ seed_intent }}" hidden></div>
+<noscript>
+  <form method="post" action="/questions/{{ question_id }}/tutor" class="card stack">
+    <input type="hidden" name="mode" value="{{ seed_mode }}">
+    <input type="hidden" name="session_id" value="{{ seed_session_id }}">
+    <input type="hidden" name="back" value="{{ back or '' }}">
+    <input type="hidden" name="inline" value="1">
+    <button type="submit" class="primary">📚 Start the lesson</button>
+  </form>
+</noscript>
+{% endif %}
+
 <form method="post" action="/tutor/{{ question_id }}/ask" class="stack card" id="tutor-form"
       onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Thinking…';">
   <input type="hidden" name="back" value="{{ back or '' }}">
@@ -115,6 +132,47 @@
       textarea.focus();
     });
   });
+
+  // Auto-seed an empty thread that arrived with ?seed=<mode>. Same fetch+swap as a
+  // follow-up, but the request runs the canned intro. We echo the 'You' bubble so a
+  // mid-flight reload (the server stores the reply regardless) renders the same shape.
+  var seed = document.getElementById('tutor-seed');
+  if (seed) {
+    var backVal = form.querySelector('input[name=back]').value;
+    // Drop ?seed/?session_id from the address bar so a manual reload won't re-fire.
+    try {
+      history.replaceState(null, '',
+        '/tutor/{{ question_id }}' + (backVal ? '?back=' + encodeURIComponent(backVal) : ''));
+    } catch (e) {}
+
+    if (empty) empty.hidden = true;
+    bubble('user', seed.dataset.intent);
+    var seeding = bubble('assistant', 'Thinking…');
+    seeding.classList.add('tutor-pending');
+
+    var sbody = new URLSearchParams();
+    sbody.set('mode', seed.dataset.mode);
+    if (seed.dataset.session) sbody.set('session_id', seed.dataset.session);
+    sbody.set('back', backVal);
+
+    fetch('/questions/{{ question_id }}/tutor', {
+      method: 'POST',
+      headers: {'Accept': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded'},
+      body: sbody.toString()
+    }).then(function (r) {
+      if (!r.ok) throw new Error('http ' + r.status);
+      return r.json();
+    }).then(function (data) {
+      if (data.skipped) { window.location.reload(); return; } // raced — show real thread
+      seeding.textContent = data.reply || '(The tutor didn’t say anything — try again.)';
+      seeding.classList.remove('tutor-pending');
+      seeding.scrollIntoView({block: 'nearest'});
+    }).catch(function () {
+      seeding.textContent = 'I couldn’t reach the tutor right now. Please reload to try again.';
+      seeding.classList.remove('tutor-pending');
+    });
+  }
 })();
 </script>
 {% endblock %}
