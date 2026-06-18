@@ -380,7 +380,13 @@ table.data tr.group-head:hover td { background: var(--surface-2); }
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm); cursor: pointer;
   background: var(--surface); transition: var(--ease);
 }
-.choice-option:hover { border-color: var(--accent); background: var(--accent-soft); }
+/* Guard hover behind a real pointer: on touch (hover: none) iOS keeps :hover
+   "stuck" on the last-tapped spot, and with htmx swapping questions in place
+   (no full reload to clear it) a fresh option can land under that spot and look
+   pre-selected. A mouse clears hover on move, so desktop is unaffected. */
+@media (hover: hover) {
+  .choice-option:hover { border-color: var(--accent); background: var(--accent-soft); }
+}
 .choice-option:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); box-shadow: var(--ring); }
 .choice-option input { width: auto; margin: 0; accent-color: var(--accent); }
 
