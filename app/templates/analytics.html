@@ -26,45 +26,62 @@
     <button type="button" :class="{ 'is-active': tab==='bank' }" @click="tab='bank'">Question bank</button>
   </div>
 
-  {# ---- Overview ---- #}
+  {# ---- Overview: per-topic mastery, a personal "learning journey" ----
+     No blended all-time accuracy here — a question you missed and later mastered
+     is 100% done. Each topic is its own progress unit; nothing crosses topics.
+     Accuracy still lives in "Needs attention" as a question-curation signal. #}
   <section x-show="tab==='overview'">
     {% if scope_user %}
-    <p class="muted">One learner's performance across their quizzes. Read-only — to act
-    on their account, use the admin console.</p>
+    <p class="muted">{{ scope_user.name }}'s learning journey — progress toward
+      mastering each topic. Read-only; account actions live in the admin console.</p>
     {% else %}
-    <p class="muted">Performance across everyone's quizzes. The adaptive scheduler already
-    uses each person's recall to decide what to show next — this page is for <em>you</em>,
-    to curate the bank and keep an eye on each learner.</p>
+    <p class="muted">Your learning journey — how close you are to mastering each
+      topic. A question counts once you've recalled it enough to reach a long
+      (21-day) review interval. Topics never blend together.</p>
     {% endif %}
 
-    <div class="kpi-grid">
-      <div class="kpi">
-        <span class="kpi-num">{% if overview.pct is not none %}{{ overview.pct }}%{% else %}—{% endif %}</span>
-        <span class="kpi-label">Accuracy</span>
-      </div>
-      <div class="kpi">
-        <span class="kpi-num">{{ overview.attempts }}</span>
-        <span class="kpi-label">Attempts</span>
-      </div>
-      <div class="kpi">
-        <span class="kpi-num">{{ overview.mastered }}</span>
-        <span class="kpi-label">Mastered</span>
-      </div>
-      <div class="kpi {{ 'kpi-warn' if overview.weak_count else '' }}">
-        <span class="kpi-num">{{ overview.weak_count }}</span>
-        <span class="kpi-label">Struggle Qs</span>
-      </div>
-      {% if not scope_user %}
-      <div class="kpi">
-        <span class="kpi-num">{{ overview.learners }}</span>
-        <span class="kpi-label">Active learners</span>
-      </div>
-      {% endif %}
-      <div class="kpi {{ 'kpi-bad' if overview.flags else '' }}">
-        <span class="kpi-num">{{ overview.flags }}</span>
-        <span class="kpi-label">Open flags</span>
-      </div>
+    {# Re-used for the topic bar and each chapter's mini bar. The empty remainder
+       of the track is the "not started" share — never-seen questions. #}
+    {% macro pbar(d, mini=False) %}
+    <div class="progress-track stacked {{ 'mini' if mini else '' }}" role="img"
+         aria-label="{{ d.mastered }} mastered, {{ d.learning }} learning, {{ d.struggling }} struggling, {{ d.not_started }} not started of {{ d.total }}">
+      {% if d.w_mastered %}<div class="seg seg-mastered" style="width: {{ d.w_mastered }}%"></div>{% endif %}
+      {% if d.w_learning %}<div class="seg seg-learning" style="width: {{ d.w_learning }}%"></div>{% endif %}
+      {% if d.w_struggling %}<div class="seg seg-struggling" style="width: {{ d.w_struggling }}%"></div>{% endif %}
     </div>
+    {% endmacro %}
+
+    {% for s in progress %}
+    <div class="card topic-progress">
+      <div class="row-between">
+        <h2>{{ s.name }}</h2>
+        <span class="topic-pct {{ 'is-done' if s.pct == 100 else '' }}">{{ s.pct }}%</span>
+      </div>
+      {{ pbar(s) }}
+      <p class="small progress-legend">
+        <span class="lg lg-mastered">{{ s.mastered }} mastered</span>
+        {% if s.learning %}<span class="lg lg-learning">{{ s.learning }} learning</span>{% endif %}
+        {% if s.struggling %}<span class="lg lg-struggling">{{ s.struggling }} struggling</span>{% endif %}
+        {% if s.not_started %}<span class="lg lg-new">{{ s.not_started }} not started</span>{% endif %}
+      </p>
+      {% if s.chapters|length > 1 %}
+      <details class="topic-chapters">
+        <summary class="muted small">By chapter</summary>
+        <table class="data">
+          {% for c in s.chapters %}
+          <tr>
+            <td>{{ c.name }}</td>
+            <td class="topic-ch-bar">{{ pbar(c, mini=True) }}</td>
+            <td class="muted small">{{ c.mastered }}/{{ c.total }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+      </details>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="muted">No questions yet — add some to a topic to start a learning journey.</p>
+    {% endfor %}
   </section>
 
   {# ---- Learners (fleet view only) ---- #}

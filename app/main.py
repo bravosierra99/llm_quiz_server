@@ -1231,50 +1231,65 @@ def _question_stats(conn, user_id=None):
     return subjects, weak
 
 
-def _overview_stats(conn, user_id=None):
-    """Top-of-page KPI numbers. Whole-fleet by default, or scoped to one learner.
-    `weak_count` is filled in by the caller (it already has the weak list)."""
-    if user_id is None:
-        agg = conn.execute(
-            "SELECT COUNT(*) AS attempts, COALESCE(SUM(is_correct), 0) AS correct FROM answers"
-        ).fetchone()
-        learners = conn.execute(
-            "SELECT COUNT(DISTINCT user_id) AS c FROM quiz_sessions "
-            "WHERE id IN (SELECT session_id FROM answers)"
-        ).fetchone()["c"]
-        mastered = conn.execute(
-            "SELECT COUNT(*) AS c FROM review_state WHERE reps >= ? AND interval_days >= ?",
-            (scheduler.LEARNED_REPS, scheduler.MASTERED_INTERVAL_DAYS),
-        ).fetchone()["c"]
-        flags = conn.execute(
-            "SELECT COUNT(DISTINCT question_id) AS c FROM question_flags WHERE resolved_at IS NULL"
-        ).fetchone()["c"]
-    else:
-        agg = conn.execute(
-            "SELECT COUNT(*) AS attempts, COALESCE(SUM(a.is_correct), 0) AS correct "
-            "FROM answers a JOIN quiz_sessions s ON s.id = a.session_id WHERE s.user_id = ?",
-            (user_id,),
-        ).fetchone()
-        learners = None
-        mastered = conn.execute(
-            "SELECT COUNT(*) AS c FROM review_state WHERE user_id = ? AND reps >= ? AND interval_days >= ?",
-            (user_id, scheduler.LEARNED_REPS, scheduler.MASTERED_INTERVAL_DAYS),
-        ).fetchone()["c"]
-        flags = conn.execute(
-            "SELECT COUNT(DISTINCT question_id) AS c FROM question_flags "
-            "WHERE resolved_at IS NULL AND user_id = ?",
-            (user_id,),
-        ).fetchone()["c"]
-    attempts, correct = agg["attempts"], agg["correct"]
-    return {
-        "attempts": attempts,
-        "correct": correct,
-        "pct": round(100 * correct / attempts) if attempts else None,
-        "learners": learners,
-        "mastered": mastered,
-        "flags": flags,
-        "weak_count": 0,
-    }
+def _progress_shape(d):
+    """Fill a counts dict (total/not_started/struggling/mastered) with the derived
+    buckets and the stacked-bar segment widths. Buckets, by SM-2 state:
+      not_started — never attempted (reps IS NULL)
+      struggling  — a row exists but reps == 0: the last answer was wrong and it's
+                    relearning (also a once-mastered card that lapsed when it came due)
+      learning    — answered right at least once (reps >= 1) but not over the bar
+      mastered    — cleared the bar (reps >= LEARNED_REPS AND interval >= 21d)
+    `pct` is mastery (mastered/total) — the headline "how close am I". The w_* are
+    exact (unrounded) %% widths so the stacked segments never sum past 100."""
+    total = d["total"]
+    d["seen"] = total - d["not_started"]
+    d["learning"] = d["seen"] - d["struggling"] - d["mastered"]
+    d["pct"] = round(100 * d["mastered"] / total) if total else 0
+    span = total or 1
+    d["w_mastered"] = 100 * d["mastered"] / span
+    d["w_learning"] = 100 * d["learning"] / span
+    d["w_struggling"] = 100 * d["struggling"] / span
+    return d
+
+
+def _subject_progress(conn, user_id):
+    """Per-topic learning journey for ONE learner. Mastery is the SAME predicate as
+    scheduler.chapter_progress, so these numbers line up with the mastery badges
+    learners already see on the quiz-setup screen. Each subject is its own
+    self-contained unit — nothing is blended across topics. Empty chapters/subjects
+    (no questions) are omitted: there is nothing to master there. Each subject (and
+    each chapter under it) carries the four-bucket breakdown from _progress_shape."""
+    rows = [dict(r) for r in conn.execute(
+        """SELECT s.id AS subject_id, s.name AS subject,
+                  c.id AS chapter_id, c.name AS chapter,
+                  COUNT(q.id) AS total,
+                  SUM(CASE WHEN r.reps IS NULL THEN 1 ELSE 0 END) AS not_started,
+                  SUM(CASE WHEN r.reps = 0 THEN 1 ELSE 0 END) AS struggling,
+                  SUM(CASE WHEN r.reps >= ? AND COALESCE(r.interval_days, 0) >= ?
+                           THEN 1 ELSE 0 END) AS mastered
+           FROM subjects s
+           JOIN chapters c ON c.subject_id = s.id
+           JOIN questions q ON q.chapter_id = c.id
+           LEFT JOIN review_state r ON r.question_id = q.id AND r.user_id = ?
+           GROUP BY c.id
+           ORDER BY s.name, c.position, c.id""",
+        (scheduler.LEARNED_REPS, scheduler.MASTERED_INTERVAL_DAYS, user_id),
+    )]
+    subjects = []
+    for r in rows:
+        if not subjects or subjects[-1]["id"] != r["subject_id"]:
+            subjects.append({"id": r["subject_id"], "name": r["subject"], "chapters": [],
+                             "total": 0, "not_started": 0, "struggling": 0, "mastered": 0})
+        s = subjects[-1]
+        ch = _progress_shape({"id": r["chapter_id"], "name": r["chapter"],
+                              "total": r["total"], "not_started": r["not_started"],
+                              "struggling": r["struggling"], "mastered": r["mastered"]})
+        s["chapters"].append(ch)
+        for k in ("total", "not_started", "struggling", "mastered"):
+            s[k] += r[k]
+    for s in subjects:
+        _progress_shape(s)
+    return subjects
 
 
 def _user_rollups(conn):
@@ -1300,15 +1315,20 @@ def _user_rollups(conn):
     return rows
 
 
-def _analytics_context(conn, scope_user=None):
-    """Assemble everything analytics.html needs, fleet-wide or scoped to one
-    learner. The per-user view drops the fleet-only sections (flagged queue and
-    the per-user roster)."""
-    uid = scope_user["id"] if scope_user else None
-    overview = _overview_stats(conn, uid)
-    subjects, weak = _question_stats(conn, uid)
-    overview["weak_count"] = len(weak)
-    ctx = {"overview": overview, "subjects": subjects, "weak": weak, "scope_user": scope_user}
+def _analytics_context(conn, viewer, scope_user=None):
+    """Assemble everything analytics.html needs.
+
+    Two scopes are decoupled here on purpose. The Overview tab is a personal
+    *learning journey* — per-topic mastery — and mastery only means anything per
+    user, so it's scoped to `scope_user or viewer` (the admin's own progress by
+    default, a learner's when drilled in). The curation tools (struggle questions,
+    question bank) stay fleet-wide on the default page and scope to the learner on
+    a drill-down. The flagged queue and per-user roster are fleet-only."""
+    progress = _subject_progress(conn, (scope_user or viewer)["id"])
+    cur_uid = scope_user["id"] if scope_user else None
+    subjects, weak = _question_stats(conn, cur_uid)
+    ctx = {"progress": progress, "subjects": subjects, "weak": weak,
+           "scope_user": scope_user}
     if scope_user is None:
         ctx["flagged"] = _flagged_questions(conn)
         ctx["users"] = _user_rollups(conn)
@@ -1335,11 +1355,11 @@ def _flagged_questions(conn):
 
 @app.get("/analytics", response_class=HTMLResponse)
 def analytics(request: Request):
-    _, redirect = require_admin(request)
+    admin, redirect = require_admin(request)
     if redirect:
         return redirect
     with get_conn() as conn:
-        ctx = _analytics_context(conn)
+        ctx = _analytics_context(conn, admin)
     return render(request, "analytics.html", ai_review=None, **ctx)
 
 
@@ -1355,7 +1375,7 @@ def analytics_user(request: Request, user_id: int):
     if not target:
         return render(request, "forbidden.html", user=admin)
     with get_conn() as conn:
-        ctx = _analytics_context(conn, scope_user=target)
+        ctx = _analytics_context(conn, admin, scope_user=target)
     return render(request, "analytics.html", ai_review=None, **ctx)
 
 
@@ -1365,11 +1385,11 @@ def analytics_ai_review(request: Request):
     (deterministic SM-2) decides what to show; this is a SEPARATE, optional tool
     that gives qualitative curation advice ('this prompt is ambiguous', 'the
     answer key looks wrong'). Nothing is changed automatically."""
-    _, redirect = require_admin(request)
+    admin, redirect = require_admin(request)
     if redirect:
         return redirect
     with get_conn() as conn:
-        ctx = _analytics_context(conn)
+        ctx = _analytics_context(conn, admin)
     ai_review = ai.review_results(ctx["weak"])
     return render(request, "analytics.html", ai_review=ai_review, **ctx)
 

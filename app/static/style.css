@@ -448,6 +448,41 @@ table.data tr.group-head:hover td { background: var(--surface-2); }
 .kpi-bad  { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: var(--danger-soft); }
 .kpi-bad .kpi-num { color: var(--danger); }
 
+/* Per-topic "learning journey" cards on the analytics overview. The bar is a
+   stacked breakdown — mastered (green) | learning (accent) | struggling (warn) —
+   and the empty tail of the track is "not started" (never-seen questions). The
+   headline %% is mastery, green once the whole topic is done. */
+.topic-progress { margin: 1rem 0; }
+.topic-progress h2 { margin: 0; }
+.topic-pct { font-size: 1.5rem; font-weight: 800; letter-spacing: -.02em; color: var(--accent); }
+.topic-pct.is-done { color: var(--good); }
+.progress-track {
+  display: flex; height: 10px; border-radius: var(--radius-pill); overflow: hidden;
+  background: var(--surface-2); border: 1px solid var(--border); margin: .55rem 0 .5rem;
+}
+.progress-track .seg { height: 100%; transition: width var(--ease); }
+.seg-mastered   { background: var(--good); }
+.seg-learning   { background: var(--accent); }
+.seg-struggling { background: var(--warn); }
+.progress-track.mini { height: 7px; margin: 0; min-width: 80px; }
+
+/* Legend under a topic bar — a swatch per bucket, matching the segment colours. */
+.progress-legend { margin: .15rem 0 .2rem; color: var(--muted); }
+.progress-legend .lg { display: inline-block; margin-right: .9rem; white-space: nowrap; }
+.progress-legend .lg::before {
+  content: ''; display: inline-block; width: .6rem; height: .6rem; border-radius: 2px;
+  margin-right: .32rem; vertical-align: -1px;
+}
+.lg-mastered::before   { background: var(--good); }
+.lg-learning::before   { background: var(--accent); }
+.lg-struggling::before { background: var(--warn); }
+.lg-new::before        { background: var(--surface-2); border: 1px solid var(--border); }
+
+.topic-chapters { margin-top: .6rem; }
+.topic-chapters summary { cursor: pointer; padding: .3rem 0; }
+.topic-chapters table.data td { vertical-align: middle; }
+.topic-ch-bar { width: 55%; }
+
 /* Section tabs on the analytics page (named to avoid the .tabs used elsewhere).
    A button row that degrades to plain stacked sections without JS. */
 .tabbar { display: flex; flex-wrap: wrap; gap: .2rem; margin: 1.2rem 0 1.4rem; border-bottom: 1px solid var(--border); }
