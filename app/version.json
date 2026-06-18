@@ -1,10 +1,10 @@
 {
-  "version": "0.1.1",
-  "commit": "99633c15b25da750be8206017b36ba051b499887",
-  "commit_short": "99633c1",
+  "version": "0.1.2",
+  "commit": "442653db50e545720d3f68c8d4c9e741a8ad467e",
+  "commit_short": "442653d",
   "branch": "main",
   "clean": false,
-  "commit_message": "fix(tutor): seed lessons via fetch, not a blocking full-page POST",
-  "commit_date": "2026-06-17 20:09:39 -0400",
-  "build_date": "2026-06-17T20:15:01-04:00"
+  "commit_message": "feat(analytics): per-topic mastery \"learning journey\" overview",
+  "commit_date": "2026-06-18 00:30:06 -0400",
+  "build_date": "2026-06-18T00:30:50-04:00"
 }
