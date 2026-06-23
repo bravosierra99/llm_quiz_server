@@ -22,6 +22,8 @@ import math
 import random
 from datetime import datetime, timedelta
 
+from . import db
+
 EASE_START = 2.5
 EASE_FLOOR = 1.3
 EASE_PENALTY = 0.2          # ease lost on a miss
@@ -127,7 +129,8 @@ def mark_mastered(conn, user_id, question_id):
 # Selection
 # --------------------------------------------------------------------------
 def select_question_ids(conn, user_id, chapter_ids, limit, order="adaptive", exclude=None):
-    """Return up to `limit` question ids from the chosen chapters.
+    """Return up to `limit` question ids from the chosen nodes AND everything in
+    their subtrees (picking a parent topic sweeps up all its children's questions).
 
     order="adaptive" (default) is the science-backed path: due questions first,
     then a capped number of never-seen questions, then not-yet-due ones if room
@@ -138,6 +141,11 @@ def select_question_ids(conn, user_id, chapter_ids, limit, order="adaptive", exc
 
     `exclude` is a set/iterable of question ids to skip — used by endless mode to
     avoid re-serving questions already shown in the current session."""
+    if not chapter_ids:
+        return []
+    # Expand each selected node to its whole subtree, so a quiz over a topic
+    # includes questions filed under any descendant node, at any depth.
+    chapter_ids = db.subtree_ids(conn, chapter_ids)
     if not chapter_ids:
         return []
     exclude = set(exclude or ())
@@ -236,21 +244,28 @@ def _relearn_ready(conn, user_id, last_reviewed, gap):
 # Mastery / progress (Phase 2)
 # --------------------------------------------------------------------------
 def chapter_progress(conn, user_id, chapter_id):
-    """Per-user progress for one chapter, for the mastery badge.
+    """Per-user progress for one node, rolled up over its WHOLE subtree, for the
+    mastery badge.
 
-    A single, consistent signal: how many of the chapter's questions this user has
-    *mastered* — i.e. cleared the SM-2 bar (survived LEARNED_REPS recalls AND
-    reached the MASTERED_INTERVAL_DAYS interval). A mastered question that has
-    since come due still counts; "mastered" is about having learned it, not about
-    whether it's due right now. Label is always "<mastered>/<total> mastered".
+    A single, consistent signal: how many of the node's (and descendants')
+    questions this user has *mastered* — i.e. cleared the SM-2 bar (survived
+    LEARNED_REPS recalls AND reached the MASTERED_INTERVAL_DAYS interval). A
+    mastered question that has since come due still counts; "mastered" is about
+    having learned it, not about whether it's due right now. Label is always
+    "<mastered>/<total> mastered". The subtree rollup uses the SAME descendants
+    set as selection and analytics, so badges and the journey page agree.
 
     Returns a dict with counts and a status one of: empty | partial | mastered."""
+    ids = db.subtree_ids(conn, [chapter_id])
+    if not ids:
+        return {"total": 0, "seen": 0, "mastered": 0, "status": "empty", "label": ""}
+    ph = ",".join("?" for _ in ids)
     rows = conn.execute(
-        """SELECT r.reps AS reps, r.interval_days AS interval_days
+        f"""SELECT r.reps AS reps, r.interval_days AS interval_days
            FROM questions q
            LEFT JOIN review_state r ON r.question_id = q.id AND r.user_id = ?
-           WHERE q.chapter_id = ?""",
-        (user_id, chapter_id),
+           WHERE q.chapter_id IN ({ph})""",
+        (user_id, *ids),
     ).fetchall()
     total = len(rows)
     if total == 0:

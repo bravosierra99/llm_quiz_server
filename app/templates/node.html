@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}{{ node.name }} · FleetQuiz{% endblock %}
+{% block body %}
+{# Breadcrumb: Library / root / … / this node (ancestors is root→node inclusive) #}
+<p class="muted">
+  <a href="/library">Library</a>
+  {% for a in ancestors %}
+    / {% if not loop.last %}<a href="/nodes/{{ a.id }}">{{ a.name }}</a>{% else %}{{ a.name }}{% endif %}
+  {% endfor %}
+</p>
+
+<div class="row-between">
+  <h1>{{ node.name }}</h1>
+  {% if is_admin %}
+  <form method="post" action="/nodes/{{ node.id }}/delete"
+        onsubmit="return confirm('Delete this node and everything beneath it (sub-nodes + questions)?')">
+    <button class="btn danger">Delete</button>
+  </form>
+  {% endif %}
+</div>
+{% if node.description %}<p>{{ node.description }}</p>{% endif %}
+{% if progress and progress.status not in ('empty',) %}
+  <span class="badge mastery-{{ progress.status }}">{{ progress.label }} (whole subtree)</span>
+{% endif %}
+{% if request.query_params.get('move_error') %}
+<p class="flash danger">Can't move a node into its own subtree.</p>
+{% endif %}
+{% if request.query_params.get('saved') %}
+<p class="flash">Saved {{ request.query_params.get('saved') }} question(s).</p>
+{% endif %}
+
+{# Add this node (and its subtree) to one of my collections #}
+{% if my_collections %}
+<form method="post" action="/collections/{{ my_collections[0].id }}/nodes" class="inline-form"
+      onsubmit="this.action='/collections/'+this.cid.value+'/nodes';">
+  <input type="hidden" name="node_id" value="{{ node.id }}">
+  <input type="hidden" name="back" value="/nodes/{{ node.id }}">
+  <label>Add to collection
+    <select name="cid">
+      {% for c in my_collections %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit" class="btn small primary">+ Add</button>
+</form>
+{% endif %}
+
+{% if is_admin and is_root %}
+<div class="card">
+  <h3>Teaching notes <span class="muted small">— steer the tutor for this topic</span></h3>
+  <p class="muted small">Tells the tutor who it's helping and how to pitch explanations.
+    e.g. <em>"For my 6-year-old — short, gentle, lots of encouragement."</em></p>
+  <form method="post" action="/nodes/{{ node.id }}/teaching-notes" class="stack">
+    <textarea name="teaching_notes" rows="3"
+      placeholder="How should the tutor explain things for this topic?">{{ node.teaching_notes or '' }}</textarea>
+    <button type="submit" class="primary">Save teaching notes</button>
+  </form>
+</div>
+{% endif %}
+
+{# ---- Child nodes (sub-topics / chapters) ---- #}
+<h2>Sub-topics</h2>
+{% if children %}
+<div class="cards">
+  {% for c in children %}
+  <div class="card">
+    <div class="row-between">
+      <h3><a href="/nodes/{{ c.id }}">{{ c.name }}</a></h3>
+      <span class="pill">{{ c.question_count }} Q</span>
+    </div>
+    {% if c.child_count %}<p class="meta">{{ c.child_count }} sub-node{{ '' if c.child_count == 1 else 's' }}</p>{% endif %}
+    {% if c.progress and c.progress.status not in ('empty',) %}
+      <span class="badge mastery-{{ c.progress.status }}">{{ c.progress.label }}</span>
+    {% endif %}
+    <div class="actions">
+      <a class="btn" href="/nodes/{{ c.id }}">Open</a>
+      {% if is_admin %}<a class="btn" href="/nodes/{{ c.id }}/generate">✨ AI generate</a>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted">No sub-topics yet.</p>
+{% endif %}
+
+{% if is_admin %}
+<div class="card">
+  <h3>New sub-topic</h3>
+  <form method="post" action="/nodes/{{ node.id }}/children" class="stack">
+    <label>Name <input name="name" required placeholder="e.g. Addition, or Chapter 1 — Blinking an LED"></label>
+    <label>Order <input name="position" type="number" value="{{ children|length }}"></label>
+    <button type="submit" class="primary">Add sub-topic</button>
+  </form>
+</div>
+{% endif %}
+
+{# ---- Questions filed directly on this node ---- #}
+<div class="row-between">
+  <h2>Questions here</h2>
+  {% if is_admin %}
+  <div class="actions">
+    <a class="btn primary" href="/nodes/{{ node.id }}/generate">✨ AI generate</a>
+    <a class="btn" href="/nodes/{{ node.id }}/questions/new">+ Add question</a>
+  </div>
+  {% endif %}
+</div>
+{% if questions %}
+<ol class="qlist">
+  {% for q in questions %}
+  <li class="card">
+    <div class="row-between">
+      <span class="pill type-{{ q.type }}">{{ q.type }}</span>
+      {% if is_admin %}
+      <div class="actions">
+        <a class="btn small" href="/questions/{{ q.id }}/edit">Edit</a>
+        <form method="post" action="/questions/{{ q.id }}/delete"
+              onsubmit="return confirm('Delete this question?')">
+          <button class="btn small danger">Delete</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+    <p class="prompt">{{ q.prompt }}</p>
+    {% if q.choices %}
+    <ul class="choices">
+      {% for c in q.choices %}
+      <li class="{{ 'correct' if c == q.answer else '' }}">{{ c }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="answer"><strong>Answer:</strong> {{ q.answer }}</p>
+    {% endif %}
+    {% if q.explanation %}<p class="muted explanation">{{ q.explanation }}</p>{% endif %}
+    {% if q.source_id %}<p class="muted small">📎 Source: <a href="/sources/{{ q.source_id }}" target="_blank">{{ q.source_label }}</a></p>{% endif %}
+  </li>
+  {% endfor %}
+</ol>
+{% else %}
+<p class="muted">No questions filed directly here. Add some, or put them under a sub-topic.</p>
+{% endif %}
+
+{# ---- Move (re-parent) ---- #}
+{% if is_admin and move_targets %}
+<div class="card">
+  <h3>Move this node</h3>
+  <p class="muted small">Re-file under another node, or make it a top-level topic.
+    Can't move into its own subtree.</p>
+  <form method="post" action="/nodes/{{ node.id }}/move" class="inline-form">
+    <label>New parent
+      <select name="parent_id">
+        <option value="">— top-level topic —</option>
+        {% for t in move_targets %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="btn">Move</button>
+  </form>
+</div>
+{% endif %}
+
+{# ---- Reference material (topic-level sources) ---- #}
+<h2>Reference material</h2>
+<p class="muted">Documents and links questions in this topic are drawn from (shared
+  across the whole topic). PDFs and text files can feed AI generation.</p>
+{% if sources %}
+<div class="cards">
+  {% for s in sources %}
+  <div class="card">
+    <div class="row-between">
+      <span>
+        {% if s.kind == 'file' %}📄{% elif s.kind == 'url' %}🔗{% else %}📝{% endif %}
+        <a href="/sources/{{ s.id }}" target="_blank">{{ s.title }}</a>
+      </span>
+      {% if is_admin %}
+      <form method="post" action="/sources/{{ s.id }}/delete"
+            onsubmit="return confirm('Delete this source? Questions stay but lose their link.')">
+        <button class="btn small danger">Delete</button>
+      </form>
+      {% endif %}
+    </div>
+    <p class="muted small">
+      {% if s.kind == 'file' %}{{ s.filename }}{% if not s.content %} · (no extractable text){% endif %}
+      {% elif s.kind == 'url' %}{{ s.url }}
+      {% else %}pasted text{% endif %}
+    </p>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted">No reference material yet.</p>
+{% endif %}
+
+{% if is_admin %}
+<div class="card">
+  <h3>Add reference material</h3>
+  <form method="post" action="/nodes/{{ node.id }}/sources" enctype="multipart/form-data" class="stack">
+    <label>Title <span class="muted">(optional)</span>
+      <input name="title" placeholder="e.g. Lab manual — Experiment 1">
+    </label>
+    <label>Upload a file <span class="muted">(PDF, .txt, .md — used for AI generation)</span>
+      <input type="file" name="file">
+    </label>
+    <label>…or a URL <span class="muted">(stored as a reference link)</span>
+      <input name="url" placeholder="https://…">
+    </label>
+    <label>…or paste text
+      <textarea name="content" rows="4" placeholder="Paste source text"></textarea>
+    </label>
+    <button type="submit" class="primary">Add source</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

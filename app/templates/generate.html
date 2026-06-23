@@ -6,7 +6,7 @@
 <p class="muted small">Using <code>{{ ai_model }}</code> at <code>{{ ai_base }}</code>.
    Generated questions go to a review step before they're saved.</p>
 
-<form method="post" action="/chapters/{{ chapter.id }}/generate" enctype="multipart/form-data" class="stack card">
+<form method="post" action="/nodes/{{ chapter.id }}/generate" enctype="multipart/form-data" class="stack card">
   <div class="tabs">
     <label class="radio"><input type="radio" name="mode" value="topic" checked onchange="syncMode()"> From a topic / prompt</label>
     <label class="radio"><input type="radio" name="mode" value="source" onchange="syncMode()"> From source material</label>

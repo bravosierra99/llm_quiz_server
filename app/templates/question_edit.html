@@ -5,7 +5,7 @@
 <p class="muted">Chapter: {{ chapter.name }}</p>
 
 <form method="post"
-      action="{{ ('/questions/' ~ q.id) if q else ('/chapters/' ~ chapter.id ~ '/questions') }}"
+      action="{{ ('/questions/' ~ q.id) if q else ('/nodes/' ~ chapter.id ~ '/questions') }}"
       class="stack card" id="qform">
   <label>Type
     <select name="type" id="qtype" onchange="syncType()">
@@ -43,7 +43,7 @@
 
   <div class="actions">
     <button type="submit" class="primary">{{ 'Save changes' if q else 'Add question' }}</button>
-    <a class="btn" href="/chapters/{{ chapter.id }}">Cancel</a>
+    <a class="btn" href="/nodes/{{ chapter.id }}">Cancel</a>
   </div>
 </form>
 

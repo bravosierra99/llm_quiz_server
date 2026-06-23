@@ -32,7 +32,7 @@
   <nav :class="{ 'nav-collapsed': !open }" @click="open = false">
     <a href="/" class="{{ 'active' if path == '/' else '' }}">Home</a>
     <a href="/quiz" class="{{ 'active' if path.startswith('/quiz') else '' }}">Take a quiz</a>
-    <a href="/library" class="{{ 'active' if path.startswith('/library') or path.startswith('/subjects') or path.startswith('/chapters') else '' }}">Library</a>
+    <a href="/library" class="{{ 'active' if path.startswith('/library') or path.startswith('/nodes') or path.startswith('/subjects') or path.startswith('/chapters') else '' }}">Library</a>
     <a href="/history" class="{{ 'active' if path.startswith('/history') else '' }}">History</a>
     {% if user and user.is_admin %}
     <a href="/analytics" class="{{ 'active' if path.startswith('/analytics') else '' }}">Analytics</a>

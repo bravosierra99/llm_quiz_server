@@ -9,8 +9,8 @@
 
 {% if result %}
 <div class="flash">
-  Imported into <strong><a href="/subjects/{{ result.subject_id }}">{{ result.subject }}</a></strong>:
-  +{{ result.chapters }} chapters, <strong>+{{ result.questions }} questions</strong>,
+  Imported into <strong><a href="/nodes/{{ result.subject_id }}">{{ result.subject }}</a></strong>:
+  +{{ result.chapters }} nodes, <strong>+{{ result.questions }} questions</strong>,
   +{{ result.sources }} sources
   ({{ result.skipped_dupe }} duplicates skipped, {{ result.rejected }} rejected).
 </div>
@@ -32,19 +32,26 @@
 <details class="card">
   <summary>Expected JSON shape</summary>
 <pre class="ai-review">{
-  "subject": {"name": "...", "description": "..."},
-  "chapters": [
+  "topic": {"name": "...", "description": "...", "teaching_notes": "..."},
+  "children": [
     {
-      "name": "Chapter 1 — ...",
-      "source": {"title": "...", "content": "...markdown knowledge base..."},
-      "questions": [
-        {"type": "mcq", "prompt": "...", "choices": ["A","B","C","D"],
-         "answer": "B", "explanation": "..."},
-        {"type": "truefalse", "prompt": "...", "answer": "True", "explanation": "..."},
-        {"type": "short", "prompt": "...", "answer": "...", "explanation": "..."}
+      "name": "Math",
+      "children": [                              // nest to ANY depth
+        {
+          "name": "Addition",
+          "source": {"title": "...", "content": "...markdown knowledge base..."},
+          "questions": [
+            {"type": "mcq", "prompt": "...", "choices": ["A","B","C","D"],
+             "answer": "B", "explanation": "..."},
+            {"type": "truefalse", "prompt": "...", "answer": "True", "explanation": "..."},
+            {"type": "short", "prompt": "...", "answer": "...", "explanation": "..."}
+          ]
+        }
       ]
     }
   ]
-}</pre>
+}
+
+// The old flat shape still works: {"subject": {...}, "chapters": [{name, source, questions}]}</pre>
 </details>
 {% endblock %}

@@ -19,7 +19,7 @@ import queue
 import threading
 
 from . import ai, search, sources
-from .db import get_conn, jloads
+from .db import get_conn, jloads, node_root_id
 
 _Q = queue.Queue()
 _started = False
@@ -117,9 +117,9 @@ def _load_context(qid):
         q = dict(q)
         q["choices"] = jloads(q["choices"])
         chapter = dict(conn.execute("SELECT * FROM chapters WHERE id = ?", (q["chapter_id"],)).fetchone())
-        subject = dict(conn.execute(
-            "SELECT s.* FROM subjects s JOIN chapters c ON c.subject_id = s.id WHERE c.id = ?",
-            (q["chapter_id"],)).fetchone())
+        # The "subject" is the question's root topic (the tree's top-level node).
+        root_id = node_root_id(conn, q["chapter_id"])
+        subject = dict(conn.execute("SELECT * FROM chapters WHERE id = ?", (root_id,)).fetchone())
         src = sources.get(conn, q["source_id"]) if q["source_id"] else None
         kb = sources.text_for_generation(src) if src else ""
     return q, chapter, subject, kb, q["source_id"]

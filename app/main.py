@@ -2,7 +2,8 @@
 
 Server-rendered FastAPI + Jinja2. The whole UI is plain HTML forms so it works
 on any device with no build step. Routes are grouped: identity, library
-(subjects/chapters/questions), AI generation, and the quiz loop.
+(an arbitrary-depth node tree + per-person collections), questions, AI
+generation, and the quiz loop.
 """
 import json
 import os
@@ -16,7 +17,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import ai, auth, importer, jobs, scheduler, sources, version
+from . import ai, auth, db, importer, jobs, scheduler, sources, version
 from .db import get_conn, init_db, jloads
 from .importer import import_bank_data
 
@@ -113,12 +114,66 @@ def _study_streak(days: set) -> int:
     return streak
 
 
-# Subject counts used by the library listing.
-_SUBJECT_COUNTS = """SELECT s.*,
-               (SELECT COUNT(*) FROM chapters c WHERE c.subject_id = s.id) AS chapter_count,
-               (SELECT COUNT(*) FROM questions q JOIN chapters c ON q.chapter_id = c.id
-                  WHERE c.subject_id = s.id) AS question_count
-        FROM subjects s"""
+# --- node-tree view helpers ----------------------------------------------
+
+def _node_card(conn, node):
+    """Decorate a node row (dict-able) with subtree rollups for a listing card:
+    question_count (whole subtree) and child_count (descendant nodes)."""
+    ids = db.subtree_ids(conn, [node["id"]])
+    ph = ",".join("?" for _ in ids)
+    qn = conn.execute(
+        f"SELECT COUNT(*) AS n FROM questions WHERE chapter_id IN ({ph})", ids).fetchone()["n"]
+    d = dict(node)
+    d["question_count"] = qn
+    d["child_count"] = len(ids) - 1
+    return d
+
+
+def _root_topics(conn):
+    """All root topics (parent_id IS NULL), each decorated with subtree counts."""
+    rows = conn.execute(
+        "SELECT * FROM chapters WHERE parent_id IS NULL ORDER BY name").fetchall()
+    return [_node_card(conn, r) for r in rows]
+
+
+def _user_collections(conn, user_id):
+    """A user's collections, each with its member nodes decorated as cards."""
+    colls = conn.execute(
+        "SELECT * FROM collections WHERE user_id = ? ORDER BY name", (user_id,)).fetchall()
+    out = []
+    for c in colls:
+        members = conn.execute(
+            """SELECT ch.* FROM collection_nodes cn JOIN chapters ch ON ch.id = cn.node_id
+               WHERE cn.collection_id = ? ORDER BY cn.position, ch.name""", (c["id"],)).fetchall()
+        out.append({**dict(c), "nodes": [_node_card(conn, m) for m in members]})
+    return out
+
+
+def _node_children(conn, parent_id, user_id):
+    """Immediate children of a node, each with a subtree question count and the
+    per-user mastery rollup for its badge."""
+    rows = conn.execute(
+        "SELECT * FROM chapters WHERE parent_id = ? ORDER BY position, id", (parent_id,)).fetchall()
+    out = []
+    for r in rows:
+        card = _node_card(conn, r)
+        card["progress"] = scheduler.chapter_progress(conn, user_id, r["id"])
+        out.append(card)
+    return out
+
+
+def _node_ancestors(conn, node_id):
+    """Breadcrumb trail from root → node (inclusive), ordered root-first."""
+    rows = conn.execute("""
+        WITH RECURSIVE anc(id, parent_id, name, depth) AS (
+            SELECT id, parent_id, name, 0 FROM chapters WHERE id = ?
+            UNION ALL
+            SELECT c.id, c.parent_id, c.name, anc.depth + 1
+            FROM chapters c JOIN anc ON c.id = anc.parent_id
+        )
+        SELECT id, name FROM anc ORDER BY depth DESC
+    """, (node_id,)).fetchall()
+    return [dict(r) for r in rows]
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -141,156 +196,218 @@ def index(request: Request):
         days = [r[0] for r in conn.execute(
             "SELECT DISTINCT substr(finished_at, 1, 10) FROM quiz_sessions "
             "WHERE user_id = ? AND finished_at IS NOT NULL", (user["id"],))]
-        has_subjects = conn.execute(
-            "SELECT 1 FROM user_subjects WHERE user_id = ? LIMIT 1", (user["id"],)).fetchone()
+        has_content = conn.execute(
+            """SELECT 1 FROM collection_nodes cn JOIN collections c ON c.id = cn.collection_id
+               WHERE c.user_id = ? LIMIT 1""", (user["id"],)).fetchone()
     summary = dict(totals)
     summary["pct"] = (round(summary["correct"] / summary["answered"] * 100)
                       if summary["answered"] else None)
     streak = _study_streak({date.fromisoformat(d) for d in days})
     return render(request, "home.html", recent=recent, summary=summary,
-                  streak=streak, has_subjects=bool(has_subjects))
+                  streak=streak, has_subjects=bool(has_content))
 
 
 @app.get("/library", response_class=HTMLResponse)
 def library(request: Request):
-    """The learner's study material: their subjects, plus subjects they can add."""
+    """Study material: the learner's collections (personal bundles of topics/nodes)
+    plus every root topic, for browsing and — for admins — curation."""
     user, redirect = require_user(request)
     if redirect:
         return redirect
     with get_conn() as conn:
-        # A user's library is the subjects they've added to their area; the rest
-        # are offered under "add to your area".
-        enrolled = [dict(r) for r in conn.execute(
-            _SUBJECT_COUNTS + " JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = ?"
-            " ORDER BY s.name", (user["id"],))]
-        available = [dict(r) for r in conn.execute(
-            _SUBJECT_COUNTS + " WHERE s.id NOT IN (SELECT subject_id FROM user_subjects WHERE user_id = ?)"
-            " ORDER BY s.name", (user["id"],))]
-    return render(request, "library.html", subjects=enrolled, available=available)
+        collections = _user_collections(conn, user["id"])
+        topics = _root_topics(conn)
+    return render(request, "library.html", collections=collections, topics=topics,
+                  is_admin=bool(user.get("is_admin")))
 
 
-@app.post("/subjects")
-def create_subject(request: Request, name: str = Form(...), description: str = Form("")):
+# --------------------------------------------------------------------------
+# Collections — a learner's personal, named bundles of nodes, cross-cutting the
+# strict content tree (the same node can sit in several collections). Replaces
+# the old flat per-user enrollment.
+# --------------------------------------------------------------------------
+@app.post("/collections")
+def create_collection(request: Request, name: str = Form(...)):
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    name = name.strip()
+    if name:
+        with get_conn() as conn:
+            conn.execute("INSERT INTO collections (user_id, name) VALUES (?, ?)",
+                         (user["id"], name))
+    return RedirectResponse("/library", status_code=303)
+
+
+@app.post("/collections/{cid}/delete")
+def delete_collection(request: Request, cid: int):
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:  # owner-scoped: only your own collection
+        conn.execute("DELETE FROM collections WHERE id = ? AND user_id = ?", (cid, user["id"]))
+    return RedirectResponse("/library", status_code=303)
+
+
+@app.post("/collections/{cid}/nodes")
+def add_collection_node(request: Request, cid: int, node_id: int = Form(...),
+                        back: str = Form("/library")):
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        if conn.execute("SELECT 1 FROM collections WHERE id = ? AND user_id = ?",
+                        (cid, user["id"])).fetchone():
+            conn.execute(
+                "INSERT OR IGNORE INTO collection_nodes (collection_id, node_id) VALUES (?, ?)",
+                (cid, node_id))
+    return RedirectResponse(_safe_back(back), status_code=303)
+
+
+@app.post("/collections/{cid}/nodes/{node_id}/delete")
+def remove_collection_node(request: Request, cid: int, node_id: int,
+                           back: str = Form("/library")):
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        if conn.execute("SELECT 1 FROM collections WHERE id = ? AND user_id = ?",
+                        (cid, user["id"])).fetchone():
+            conn.execute("DELETE FROM collection_nodes WHERE collection_id = ? AND node_id = ?",
+                         (cid, node_id))
+    return RedirectResponse(_safe_back(back), status_code=303)
+
+
+# --------------------------------------------------------------------------
+# Content tree — arbitrary-depth nodes. A root node (parent_id NULL) is a
+# "topic"; any node may hold child nodes AND/OR questions. Selecting a node for
+# a quiz sweeps its whole subtree (see scheduler).
+# --------------------------------------------------------------------------
+@app.post("/topics")
+def create_topic(request: Request, name: str = Form(...), description: str = Form("")):
+    """Admin: create a new root topic and drop it into the creator's library."""
     user, redirect = require_admin(request)
     if redirect:
         return redirect
+    name = name.strip()
+    if not name:
+        return RedirectResponse("/library", status_code=303)
     with get_conn() as conn:
-        cur = conn.execute("INSERT INTO subjects (name, description) VALUES (?, ?)",
-                           (name.strip(), description.strip()))
-        # The creator gets it in their own area straight away.
-        conn.execute("INSERT OR IGNORE INTO user_subjects (user_id, subject_id) VALUES (?, ?)",
-                     (user["id"], cur.lastrowid))
-    return RedirectResponse("/library", status_code=303)
+        node_id = conn.execute(
+            "INSERT INTO chapters (parent_id, name, description) VALUES (NULL, ?, ?)",
+            (name, description.strip())).lastrowid
+        coll = conn.execute(
+            "SELECT id FROM collections WHERE user_id = ? ORDER BY id LIMIT 1", (user["id"],)).fetchone()
+        coll_id = coll["id"] if coll else conn.execute(
+            "INSERT INTO collections (user_id, name) VALUES (?, 'My Library')", (user["id"],)).lastrowid
+        conn.execute("INSERT OR IGNORE INTO collection_nodes (collection_id, node_id) VALUES (?, ?)",
+                     (coll_id, node_id))
+    return RedirectResponse(f"/nodes/{node_id}", status_code=303)
 
 
-@app.post("/subjects/{subject_id}/enroll")
-def enroll_subject(request: Request, subject_id: int):
-    """Add a subject to the current user's learning area."""
-    user, redirect = require_user(request)
+@app.post("/nodes/{parent_id}/children")
+def create_child(request: Request, parent_id: int, name: str = Form(...), position: int = Form(0)):
+    """Admin: add a child node under any node (nesting is unlimited)."""
+    _, redirect = require_admin(request)
     if redirect:
         return redirect
-    with get_conn() as conn:
-        conn.execute("INSERT OR IGNORE INTO user_subjects (user_id, subject_id) VALUES (?, ?)",
-                     (user["id"], subject_id))
-    return RedirectResponse("/library", status_code=303)
+    name = name.strip()
+    if name:
+        with get_conn() as conn:
+            if conn.execute("SELECT 1 FROM chapters WHERE id = ?", (parent_id,)).fetchone():
+                conn.execute("INSERT INTO chapters (parent_id, name, position) VALUES (?, ?, ?)",
+                             (parent_id, name, position))
+    return RedirectResponse(f"/nodes/{parent_id}", status_code=303)
 
 
-@app.post("/subjects/{subject_id}/unenroll")
-def unenroll_subject(request: Request, subject_id: int):
-    """Remove a subject from the current user's learning area (content untouched)."""
-    user, redirect = require_user(request)
+@app.post("/nodes/{node_id}/move")
+def move_node(request: Request, node_id: int, parent_id: str = Form("")):
+    """Admin: re-parent a node. Empty/0 parent makes it a root topic. Rejects a
+    move into the node's own subtree — that would create a cycle."""
+    _, redirect = require_admin(request)
     if redirect:
         return redirect
+    new_parent = int(parent_id) if str(parent_id).strip() not in ("", "0") else None
     with get_conn() as conn:
-        conn.execute("DELETE FROM user_subjects WHERE user_id = ? AND subject_id = ?",
-                     (user["id"], subject_id))
-    return RedirectResponse("/library", status_code=303)
+        if new_parent is not None and (
+                new_parent == node_id or db.is_descendant(conn, new_parent, node_id)):
+            return RedirectResponse(f"/nodes/{node_id}?move_error=1", status_code=303)
+        conn.execute("UPDATE chapters SET parent_id = ? WHERE id = ?", (new_parent, node_id))
+    return RedirectResponse(f"/nodes/{node_id}", status_code=303)
 
 
-@app.get("/subjects/{subject_id}", response_class=HTMLResponse)
-def view_subject(request: Request, subject_id: int):
-    user, redirect = require_user(request)
-    if redirect:
-        return redirect
-    with get_conn() as conn:
-        subject = conn.execute("SELECT * FROM subjects WHERE id = ?", (subject_id,)).fetchone()
-        if not subject:
-            return RedirectResponse("/", status_code=303)
-        chapters = [dict(r) for r in conn.execute("""
-            SELECT c.*, (SELECT COUNT(*) FROM questions q WHERE q.chapter_id = c.id) AS question_count
-            FROM chapters c WHERE c.subject_id = ? ORDER BY c.position, c.id
-        """, (subject_id,))]
-        for c in chapters:
-            c["progress"] = scheduler.chapter_progress(conn, user["id"], c["id"])
-        source_list = sources.list_for_subject(conn, subject_id)
-    return render(request, "subject.html", subject=dict(subject), chapters=chapters,
-                  sources=source_list, is_admin=bool(user.get("is_admin")))
-
-
-@app.post("/subjects/{subject_id}/chapters")
-def create_chapter(request: Request, subject_id: int, name: str = Form(...), position: int = Form(0)):
+@app.post("/nodes/{node_id}/delete")
+def delete_node(request: Request, node_id: int):
+    """Admin: delete a node and its whole subtree (ON DELETE CASCADE)."""
     _, redirect = require_admin(request)
     if redirect:
         return redirect
     with get_conn() as conn:
-        conn.execute("INSERT INTO chapters (subject_id, name, position) VALUES (?, ?, ?)",
-                     (subject_id, name.strip(), position))
-    return RedirectResponse(f"/subjects/{subject_id}", status_code=303)
+        parent = conn.execute("SELECT parent_id FROM chapters WHERE id = ?", (node_id,)).fetchone()
+        conn.execute("DELETE FROM chapters WHERE id = ?", (node_id,))
+    dest = f"/nodes/{parent['parent_id']}" if parent and parent["parent_id"] else "/library"
+    return RedirectResponse(dest, status_code=303)
 
 
-@app.post("/subjects/{subject_id}/delete")
-def delete_subject(request: Request, subject_id: int):
-    _, redirect = require_admin(request)
-    if redirect:
-        return redirect
-    with get_conn() as conn:
-        conn.execute("DELETE FROM subjects WHERE id = ?", (subject_id,))
-    return RedirectResponse("/library", status_code=303)
-
-
-@app.get("/chapters/{chapter_id}", response_class=HTMLResponse)
-def view_chapter(request: Request, chapter_id: int):
+@app.get("/nodes/{node_id}", response_class=HTMLResponse)
+def view_node(request: Request, node_id: int):
+    """Unified node page: breadcrumb, child nodes, questions on this node, and (at
+    the topic root) reference sources + teaching notes."""
     user, redirect = require_user(request)
     if redirect:
         return redirect
     with get_conn() as conn:
-        chapter = conn.execute("""
-            SELECT c.*, s.name AS subject_name FROM chapters c
-            JOIN subjects s ON c.subject_id = s.id WHERE c.id = ?
-        """, (chapter_id,)).fetchone()
-        if not chapter:
-            return RedirectResponse("/", status_code=303)
+        row = conn.execute("SELECT * FROM chapters WHERE id = ?", (node_id,)).fetchone()
+        if not row:
+            return RedirectResponse("/library", status_code=303)
+        node = dict(row)
+        ancestors = _node_ancestors(conn, node_id)
+        children = _node_children(conn, node_id, user["id"])
         questions = [dict(r) for r in conn.execute("""
             SELECT q.*, src.title AS source_title, src.kind AS source_kind,
                    src.filename AS source_filename, src.url AS source_url
             FROM questions q LEFT JOIN sources src ON q.source_id = src.id
             WHERE q.chapter_id = ? ORDER BY q.id
-        """, (chapter_id,))]
+        """, (node_id,))]
+        root_id = db.node_root_id(conn, node_id)
+        source_list = sources.list_for_subject(conn, root_id) if root_id else []
+        progress = scheduler.chapter_progress(conn, user["id"], node_id)
+        my_collections = [dict(r) for r in conn.execute(
+            "SELECT id, name FROM collections WHERE user_id = ? ORDER BY name", (user["id"],))]
+        move_targets = []
+        if user.get("is_admin"):  # candidate parents = every node outside this subtree
+            subtree = set(db.subtree_ids(conn, [node_id]))
+            move_targets = [dict(r) for r in conn.execute(
+                "SELECT id, name, parent_id FROM chapters ORDER BY name")
+                if r["id"] not in subtree]
     for q in questions:
         q["choices"] = jloads(q["choices"])
         q["source_label"] = sources.label(
             {"kind": q["source_kind"], "title": q["source_title"],
              "filename": q["source_filename"], "url": q["source_url"]}
         ) if q["source_id"] else ""
-    return render(request, "chapter.html", chapter=dict(chapter), questions=questions)
+    return render(request, "node.html", node=node, ancestors=ancestors, children=children,
+                  questions=questions, sources=source_list, progress=progress,
+                  is_root=node["parent_id"] is None, move_targets=move_targets,
+                  my_collections=my_collections, is_admin=bool(user.get("is_admin")))
 
 
-@app.post("/chapters/{chapter_id}/delete")
-def delete_chapter(request: Request, chapter_id: int):
-    _, redirect = require_admin(request)
-    if redirect:
-        return redirect
-    with get_conn() as conn:
-        subj = conn.execute("SELECT subject_id FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
-        conn.execute("DELETE FROM chapters WHERE id = ?", (chapter_id,))
-    return RedirectResponse(f"/subjects/{subj['subject_id']}" if subj else "/", status_code=303)
+# Back-compat redirects for old subject/chapter URLs (history, bookmarks).
+@app.get("/subjects/{node_id}")
+def _old_subject_url(node_id: int):
+    return RedirectResponse(f"/nodes/{node_id}", status_code=307)
+
+
+@app.get("/chapters/{node_id}")
+def _old_chapter_url(node_id: int):
+    return RedirectResponse(f"/nodes/{node_id}", status_code=307)
 
 
 # --------------------------------------------------------------------------
 # Reference material (sources) — provenance a question can be traced back to
 # --------------------------------------------------------------------------
-@app.post("/subjects/{subject_id}/sources")
-async def add_source(request: Request, subject_id: int):
+@app.post("/nodes/{node_id}/sources")
+async def add_source(request: Request, node_id: int):
     _, redirect = require_admin(request)
     if redirect:
         return redirect
@@ -300,16 +417,19 @@ async def add_source(request: Request, subject_id: int):
     content = (form.get("content") or "").strip()
     upload = form.get("file")
     with get_conn() as conn:
+        # Sources live at the topic (root) level so they're shared across the whole
+        # subtree; a node anywhere in the tree resolves up to its root.
+        root_id = db.node_root_id(conn, node_id)
         # Priority: an uploaded file, else a URL, else pasted text.
         if upload is not None and getattr(upload, "filename", ""):
             data = await upload.read()
             if data:
-                sources.save_file(conn, subject_id, title, upload.filename, data)
+                sources.save_file(conn, root_id, title, upload.filename, data)
         elif url:
-            sources.create_url(conn, subject_id, title, url)
+            sources.create_url(conn, root_id, title, url)
         elif content:
-            sources.create_text(conn, subject_id, title, content)
-    return RedirectResponse(f"/subjects/{subject_id}", status_code=303)
+            sources.create_text(conn, root_id, title, content)
+    return RedirectResponse(f"/nodes/{node_id}", status_code=303)
 
 
 @app.post("/sources/{source_id}/delete")
@@ -320,7 +440,7 @@ def delete_source(request: Request, source_id: int):
     with get_conn() as conn:
         src = sources.get(conn, source_id)
         sources.delete(conn, source_id)
-    dest = f"/subjects/{src['subject_id']}" if src and src["subject_id"] else "/"
+    dest = f"/nodes/{src['subject_id']}" if src and src["subject_id"] else "/library"
     return RedirectResponse(dest, status_code=303)
 
 
@@ -348,14 +468,14 @@ def view_source(request: Request, source_id: int):
 # --------------------------------------------------------------------------
 # Manual question CRUD  (the LLM-free path — also the app's test path)
 # --------------------------------------------------------------------------
-@app.get("/chapters/{chapter_id}/questions/new", response_class=HTMLResponse)
-def new_question(request: Request, chapter_id: int):
+@app.get("/nodes/{node_id}/questions/new", response_class=HTMLResponse)
+def new_question(request: Request, node_id: int):
     user, redirect = require_admin(request)
     if redirect:
         return redirect
     with get_conn() as conn:
-        chapter = conn.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
-        source_list = sources.list_for_subject(conn, chapter["subject_id"])
+        chapter = conn.execute("SELECT * FROM chapters WHERE id = ?", (node_id,)).fetchone()
+        source_list = sources.list_for_subject(conn, db.node_root_id(conn, node_id))
     return render(request, "question_edit.html", chapter=dict(chapter), q=None, sources=source_list)
 
 
@@ -369,7 +489,7 @@ def edit_question(request: Request, question_id: int):
         if not q:
             return RedirectResponse("/", status_code=303)
         chapter = conn.execute("SELECT * FROM chapters WHERE id = ?", (q["chapter_id"],)).fetchone()
-        source_list = sources.list_for_subject(conn, chapter["subject_id"])
+        source_list = sources.list_for_subject(conn, db.node_root_id(conn, q["chapter_id"]))
     q = dict(q)
     q["choices"] = jloads(q["choices"])
     return render(request, "question_edit.html", chapter=dict(chapter), q=q, sources=source_list)
@@ -385,8 +505,8 @@ def _parse_question_form(qtype, prompt, choices_text, answer, explanation):
     return prompt.strip(), json.dumps(choices), answer.strip(), explanation.strip()
 
 
-@app.post("/chapters/{chapter_id}/questions")
-def save_new_question(request: Request, chapter_id: int, type: str = Form(...),
+@app.post("/nodes/{node_id}/questions")
+def save_new_question(request: Request, node_id: int, type: str = Form(...),
                       prompt: str = Form(...), choices: str = Form(""),
                       answer: str = Form(...), explanation: str = Form(""),
                       source_id: str = Form("")):
@@ -397,8 +517,8 @@ def save_new_question(request: Request, chapter_id: int, type: str = Form(...),
     sid = int(source_id) if source_id.isdigit() else None
     with get_conn() as conn:
         conn.execute("""INSERT INTO questions (chapter_id, type, prompt, choices, answer, explanation, source_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)""", (chapter_id, type, p, ch, a, e, sid))
-    return RedirectResponse(f"/chapters/{chapter_id}", status_code=303)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)""", (node_id, type, p, ch, a, e, sid))
+    return RedirectResponse(f"/nodes/{node_id}", status_code=303)
 
 
 @app.post("/questions/{question_id}")
@@ -415,7 +535,7 @@ def update_question(request: Request, question_id: int, type: str = Form(...),
         conn.execute("""UPDATE questions SET type=?, prompt=?, choices=?, answer=?, explanation=?, source_id=?
                         WHERE id=?""", (type, p, ch, a, e, sid, question_id))
         cid = conn.execute("SELECT chapter_id FROM questions WHERE id = ?", (question_id,)).fetchone()
-    return RedirectResponse(f"/chapters/{cid['chapter_id']}", status_code=303)
+    return RedirectResponse(f"/nodes/{cid['chapter_id']}", status_code=303)
 
 
 @app.post("/questions/{question_id}/delete")
@@ -426,29 +546,29 @@ def delete_question(request: Request, question_id: int, back: str = Form("")):
     with get_conn() as conn:
         cid = conn.execute("SELECT chapter_id FROM questions WHERE id = ?", (question_id,)).fetchone()
         conn.execute("DELETE FROM questions WHERE id = ?", (question_id,))
-    # `back` lets the quiz screens send you somewhere sensible; chapter view is
+    # `back` lets the quiz screens send you somewhere sensible; the node view is
     # the default for the content-management delete.
-    dest = _safe_back(back) if back else (f"/chapters/{cid['chapter_id']}" if cid else "/")
+    dest = _safe_back(back) if back else (f"/nodes/{cid['chapter_id']}" if cid else "/")
     return RedirectResponse(dest, status_code=303)
 
 
 # --------------------------------------------------------------------------
 # AI generation  ->  review  ->  bulk save
 # --------------------------------------------------------------------------
-@app.get("/chapters/{chapter_id}/generate", response_class=HTMLResponse)
-def generate_form(request: Request, chapter_id: int):
+@app.get("/nodes/{node_id}/generate", response_class=HTMLResponse)
+def generate_form(request: Request, node_id: int):
     user, redirect = require_admin(request)
     if redirect:
         return redirect
     with get_conn() as conn:
-        chapter = conn.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
-        source_list = sources.list_for_subject(conn, chapter["subject_id"])
+        chapter = conn.execute("SELECT * FROM chapters WHERE id = ?", (node_id,)).fetchone()
+        source_list = sources.list_for_subject(conn, db.node_root_id(conn, node_id))
     return render(request, "generate.html", chapter=dict(chapter),
                   ai_base=ai.AI_BASE_URL, ai_model=ai.AI_MODEL, sources=source_list)
 
 
-@app.post("/chapters/{chapter_id}/generate", response_class=HTMLResponse)
-async def generate_run(request: Request, chapter_id: int):
+@app.post("/nodes/{node_id}/generate", response_class=HTMLResponse)
+async def generate_run(request: Request, node_id: int):
     user, redirect = require_admin(request)
     if redirect:
         return redirect
@@ -464,7 +584,8 @@ async def generate_run(request: Request, chapter_id: int):
     # generated question keeps a traceable link to its material.
     source_id, source_text = None, ""
     with get_conn() as conn:
-        chapter = dict(conn.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone())
+        chapter = dict(conn.execute("SELECT * FROM chapters WHERE id = ?", (node_id,)).fetchone())
+        root_id = db.node_root_id(conn, node_id)
         if mode == "source":
             existing = form.get("existing_source_id", "")
             upload = form.get("source_file")
@@ -476,18 +597,18 @@ async def generate_run(request: Request, chapter_id: int):
                     source_id, source_text = src["id"], sources.text_for_generation(src)
             elif upload is not None and getattr(upload, "filename", ""):
                 data = await upload.read()
-                source_id = sources.save_file(conn, chapter["subject_id"], title, upload.filename, data)
+                source_id = sources.save_file(conn, root_id, title, upload.filename, data)
                 source_text = sources.text_for_generation(sources.get(conn, source_id))
             elif pasted:
-                source_id = sources.create_text(conn, chapter["subject_id"], title, pasted)
+                source_id = sources.create_text(conn, root_id, title, pasted)
                 source_text = pasted
     # AI call is slow — do it outside the DB connection.
     result = ai.generate_questions(mode, topic, source_text, num_questions, difficulty, types)
     return render(request, "review.html", chapter=chapter, result=result, source_id=source_id)
 
 
-@app.post("/chapters/{chapter_id}/generate/save")
-async def generate_save(request: Request, chapter_id: int):
+@app.post("/nodes/{node_id}/generate/save")
+async def generate_save(request: Request, node_id: int):
     """Save the (possibly admin-edited) reviewed questions. The review form posts
     arrays indexed per question; we reconstruct and insert the kept ones."""
     _, redirect = require_admin(request)
@@ -516,38 +637,55 @@ async def generate_save(request: Request, chapter_id: int):
             explanation = (form.get(f"explanation_{i}") or "").strip()
             conn.execute("""INSERT INTO questions (chapter_id, type, prompt, choices, answer, explanation, source_id)
                             VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                         (chapter_id, qtype, prompt, json.dumps(choices), answer, explanation, sid))
+                         (node_id, qtype, prompt, json.dumps(choices), answer, explanation, sid))
             saved += 1
-    return RedirectResponse(f"/chapters/{chapter_id}?saved={saved}", status_code=303)
+    return RedirectResponse(f"/nodes/{node_id}?saved={saved}", status_code=303)
 
 
 # --------------------------------------------------------------------------
 # Quiz loop
 # --------------------------------------------------------------------------
+def _quiz_tree(conn, node_id, user_id):
+    """Nested, quizzable view of a node's subtree: each node carries its subtree
+    question_count, mastery progress, and children. Nodes whose subtree has no
+    questions are pruned (nothing to quiz). Picking any node quizzes its subtree."""
+    ids = db.subtree_ids(conn, [node_id])
+    ph = ",".join("?" for _ in ids)
+    qcount = conn.execute(
+        f"SELECT COUNT(*) AS n FROM questions WHERE chapter_id IN ({ph})", ids).fetchone()["n"]
+    if qcount == 0:
+        return None
+    row = conn.execute("SELECT id, name FROM chapters WHERE id = ?", (node_id,)).fetchone()
+    children = []
+    for ch in conn.execute(
+            "SELECT id FROM chapters WHERE parent_id = ? ORDER BY position, id", (node_id,)):
+        sub = _quiz_tree(conn, ch["id"], user_id)
+        if sub:
+            children.append(sub)
+    return {"id": row["id"], "name": row["name"], "question_count": qcount,
+            "progress": scheduler.chapter_progress(conn, user_id, node_id),
+            "children": children}
+
+
 @app.get("/quiz", response_class=HTMLResponse)
 def quiz_setup(request: Request):
     user, redirect = require_user(request)
     if redirect:
         return redirect
     with get_conn() as conn:
-        # Only the user's enrolled subjects are quizzable; chapters are grouped
-        # under each so the page can offer a per-subject "select all".
-        subject_rows = conn.execute("""
-            SELECT s.id, s.name FROM subjects s
-            JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = ?
-            ORDER BY s.name
-        """, (user["id"],)).fetchall()
+        # Quizzable scope = the nodes in the learner's collections, each shown as a
+        # tree so any node (and its whole subtree) can be picked.
+        colls = conn.execute(
+            "SELECT id, name FROM collections WHERE user_id = ? ORDER BY name", (user["id"],)).fetchall()
         groups = []
-        for s in subject_rows:
-            chapters = [dict(r) for r in conn.execute("""
-                SELECT c.*, (SELECT COUNT(*) FROM questions q WHERE q.chapter_id = c.id) AS question_count
-                FROM chapters c WHERE c.subject_id = ? ORDER BY c.position, c.id
-            """, (s["id"],))]
-            for c in chapters:
-                # Surface the mastery count right where chapters are picked.
-                c["progress"] = scheduler.chapter_progress(conn, user["id"], c["id"])
-            groups.append({"id": s["id"], "name": s["name"], "chapters": chapters})
-    return render(request, "quiz_setup.html", subjects=groups)
+        for c in colls:
+            members = conn.execute(
+                """SELECT ch.id FROM collection_nodes cn JOIN chapters ch ON ch.id = cn.node_id
+                   WHERE cn.collection_id = ? ORDER BY cn.position, ch.name""", (c["id"],)).fetchall()
+            trees = [t for t in (_quiz_tree(conn, m["id"], user["id"]) for m in members) if t]
+            if trees:
+                groups.append({"id": c["id"], "name": c["name"], "nodes": trees})
+    return render(request, "quiz_setup.html", collections=groups)
 
 
 @app.post("/quiz/start")
@@ -898,14 +1036,23 @@ TUTOR_INTENTS = {
 def _tutor_context_row(conn, question_id):
     row = conn.execute("""
         SELECT q.id, q.type, q.prompt, q.answer, q.explanation,
-               c.name AS chapter, s.name AS subject, s.teaching_notes AS notes,
+               c.id AS chapter_id, c.name AS chapter,
                src.content AS kb
         FROM questions q
         JOIN chapters c ON q.chapter_id = c.id
-        JOIN subjects s ON c.subject_id = s.id
         LEFT JOIN sources src ON q.source_id = src.id
         WHERE q.id = ?""", (question_id,)).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    d = dict(row)
+    # "Subject" + teaching notes come from the question's root topic; the chapter
+    # is the node it's filed under (which may be nested several levels deep).
+    root_id = db.node_root_id(conn, d["chapter_id"])
+    root = conn.execute("SELECT name, teaching_notes FROM chapters WHERE id = ?",
+                        (root_id,)).fetchone() if root_id else None
+    d["subject"] = root["name"] if root else d["chapter"]
+    d["notes"] = root["teaching_notes"] if root else ""
+    return d
 
 
 def _tutor_context_block(ctx, learner_answer=None):
@@ -953,17 +1100,17 @@ def _tutor_url(question_id, back=""):
     return url
 
 
-@app.post("/subjects/{subject_id}/teaching-notes")
-def save_teaching_notes(request: Request, subject_id: int,
+@app.post("/nodes/{node_id}/teaching-notes")
+def save_teaching_notes(request: Request, node_id: int,
                         teaching_notes: str = Form(""), back: str = Form("")):
-    """Admin: free-text notes that steer the tutor's level/tone for this subject."""
+    """Admin: free-text notes that steer the tutor's level/tone for this topic."""
     _, redirect = require_admin(request)
     if redirect:
         return redirect
     with get_conn() as conn:
-        conn.execute("UPDATE subjects SET teaching_notes = ? WHERE id = ?",
-                     (teaching_notes.strip(), subject_id))
-    return RedirectResponse(_safe_back(back) if back else f"/subjects/{subject_id}",
+        conn.execute("UPDATE chapters SET teaching_notes = ? WHERE id = ?",
+                     (teaching_notes.strip(), node_id))
+    return RedirectResponse(_safe_back(back) if back else f"/nodes/{node_id}",
                             status_code=303)
 
 
@@ -1177,8 +1324,7 @@ def _question_stats(conn, user_id=None):
         scope = "AND a.session_id IN (SELECT id FROM quiz_sessions WHERE user_id = ?)"
         params = (user_id,)
     rows = [dict(r) for r in conn.execute(f"""
-        SELECT s.name AS subject, s.id AS subject_id,
-               c.name AS chapter, c.id AS chapter_id, c.position AS cpos,
+        SELECT c.name AS chapter, c.id AS chapter_id, c.position AS cpos,
                q.id AS qid, q.prompt AS prompt, q.type AS type, q.answer AS answer,
                q.source_id AS source_id, src.title AS source_title, src.kind AS source_kind,
                src.filename AS source_filename, src.url AS source_url,
@@ -1186,12 +1332,25 @@ def _question_stats(conn, user_id=None):
                COALESCE(SUM(a.is_correct), 0) AS correct
         FROM questions q
         JOIN chapters c ON q.chapter_id = c.id
-        JOIN subjects s ON c.subject_id = s.id
         LEFT JOIN answers a ON a.question_id = q.id {scope}
         LEFT JOIN sources src ON q.source_id = src.id
         GROUP BY q.id
-        ORDER BY s.name, c.position, c.id, q.id
     """, params)]
+    # The bank is grouped as topic → node → questions. With arbitrary depth, a
+    # question's "subject" is its root topic (resolved per node, cached); the
+    # "chapter" is the exact node it's filed under. Sorted in Python afterwards.
+    _root_id, _root_name = {}, {}
+    for r in rows:
+        nid = r["chapter_id"]
+        if nid not in _root_id:
+            rid = db.node_root_id(conn, nid)
+            _root_id[nid] = rid
+            if rid is not None and rid not in _root_name:
+                rr = conn.execute("SELECT name FROM chapters WHERE id = ?", (rid,)).fetchone()
+                _root_name[rid] = rr["name"] if rr else ""
+        r["subject_id"] = _root_id[nid]
+        r["subject"] = _root_name.get(_root_id[nid], "")
+    rows.sort(key=lambda r: (r["subject"].lower(), r["cpos"], r["chapter_id"], r["qid"]))
     for r in rows:
         r["source_label"] = sources.label(
             {"kind": r["source_kind"], "title": r["source_title"],
@@ -1253,43 +1412,59 @@ def _progress_shape(d):
 
 
 def _subject_progress(conn, user_id):
-    """Per-topic learning journey for ONE learner. Mastery is the SAME predicate as
-    scheduler.chapter_progress, so these numbers line up with the mastery badges
-    learners already see on the quiz-setup screen. Each subject is its own
-    self-contained unit — nothing is blended across topics. Empty chapters/subjects
-    (no questions) are omitted: there is nothing to master there. Each subject (and
-    each chapter under it) carries the four-bucket breakdown from _progress_shape."""
-    rows = [dict(r) for r in conn.execute(
-        """SELECT s.id AS subject_id, s.name AS subject,
-                  c.id AS chapter_id, c.name AS chapter,
+    """Per-topic learning journey for ONE learner, over the arbitrary-depth node
+    tree. Mastery is the SAME predicate as scheduler.chapter_progress, and every
+    node's numbers are a rollup over its WHOLE subtree — so a topic's bar, an
+    intermediate node's bar and the mastery badges on the quiz-setup screen all
+    agree. Each node carries the four-bucket breakdown from _progress_shape and a
+    `children` list (nested to any depth). Nodes whose subtree has no questions
+    are pruned: there is nothing to master there.
+
+    Returns the list of root topics, each a nested dict {id, name, children:[...],
+    + breakdown fields}."""
+    # Direct (own) counts per node — questions attached to that exact node.
+    direct = {r["node_id"]: r for r in conn.execute(
+        """SELECT q.chapter_id AS node_id,
                   COUNT(q.id) AS total,
                   SUM(CASE WHEN r.reps IS NULL THEN 1 ELSE 0 END) AS not_started,
                   SUM(CASE WHEN r.reps = 0 THEN 1 ELSE 0 END) AS struggling,
                   SUM(CASE WHEN r.reps >= ? AND COALESCE(r.interval_days, 0) >= ?
                            THEN 1 ELSE 0 END) AS mastered
-           FROM subjects s
-           JOIN chapters c ON c.subject_id = s.id
-           JOIN questions q ON q.chapter_id = c.id
+           FROM questions q
            LEFT JOIN review_state r ON r.question_id = q.id AND r.user_id = ?
-           GROUP BY c.id
-           ORDER BY s.name, c.position, c.id""",
+           GROUP BY q.chapter_id""",
         (scheduler.LEARNED_REPS, scheduler.MASTERED_INTERVAL_DAYS, user_id),
-    )]
-    subjects = []
-    for r in rows:
-        if not subjects or subjects[-1]["id"] != r["subject_id"]:
-            subjects.append({"id": r["subject_id"], "name": r["subject"], "chapters": [],
-                             "total": 0, "not_started": 0, "struggling": 0, "mastered": 0})
-        s = subjects[-1]
-        ch = _progress_shape({"id": r["chapter_id"], "name": r["chapter"],
-                              "total": r["total"], "not_started": r["not_started"],
-                              "struggling": r["struggling"], "mastered": r["mastered"]})
-        s["chapters"].append(ch)
-        for k in ("total", "not_started", "struggling", "mastered"):
-            s[k] += r[k]
-    for s in subjects:
-        _progress_shape(s)
-    return subjects
+    )}
+    nodes = {r["id"]: {"id": r["id"], "name": r["name"], "parent_id": r["parent_id"],
+                       "position": r["position"], "children": [],
+                       "total": 0, "not_started": 0, "struggling": 0, "mastered": 0}
+             for r in conn.execute("SELECT id, parent_id, name, position FROM chapters")}
+    for nid, d in direct.items():
+        n = nodes.get(nid)
+        if n:
+            for k in ("total", "not_started", "struggling", "mastered"):
+                n[k] += d[k] or 0
+    # Link children to parents; collect roots.
+    roots = []
+    for n in nodes.values():
+        parent = nodes.get(n["parent_id"]) if n["parent_id"] is not None else None
+        (parent["children"] if parent else roots).append(n)
+    for n in nodes.values():
+        n["children"].sort(key=lambda c: (c["position"], c["id"]))
+    roots.sort(key=lambda c: c["name"].lower())
+
+    def rollup(n):  # post-order: add each subtree's counts up into its ancestors
+        for c in n["children"]:
+            rollup(c)
+            for k in ("total", "not_started", "struggling", "mastered"):
+                n[k] += c[k]
+    for r in roots:
+        rollup(r)
+
+    def finalize(n):  # prune empty subtrees, then compute bar widths bottom-up
+        n["children"] = [finalize(c) for c in n["children"] if c["total"] > 0]
+        return _progress_shape(n)
+    return [finalize(r) for r in roots if r["total"] > 0]
 
 
 def _user_rollups(conn):
@@ -1632,7 +1807,7 @@ async def import_run(request: Request):
         result = import_bank_data(data)
     except (KeyError, TypeError) as e:
         return render(request, "import.html", result=None,
-                      error=f"Bad bank structure (need subject + chapters): {e}")
+                      error=f"Bad bank structure (need topic/subject + children/chapters): {e}")
     return render(request, "import.html", result=result, error=None)
 
 
