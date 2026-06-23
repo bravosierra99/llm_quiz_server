@@ -1,10 +1,10 @@
 {
-  "version": "0.1.2",
-  "commit": "442653db50e545720d3f68c8d4c9e741a8ad467e",
-  "commit_short": "442653d",
+  "version": "0.2.0",
+  "commit": "70411004f4d22f394899919bd86dcbdc3756307f",
+  "commit_short": "7041100",
   "branch": "main",
   "clean": false,
-  "commit_message": "feat(analytics): per-topic mastery \"learning journey\" overview",
-  "commit_date": "2026-06-18 00:30:06 -0400",
-  "build_date": "2026-06-18T00:30:50-04:00"
+  "commit_message": "Merge feat/node-tree-collections: arbitrary-depth node tree + collections",
+  "commit_date": "2026-06-22 20:26:47 -0400",
+  "build_date": "2026-06-22T20:27:23-04:00"
 }
