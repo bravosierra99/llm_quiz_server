@@ -45,14 +45,17 @@ CHAPTERS = {
 def seed():
     init_db()
     with get_conn() as conn:
-        existing = conn.execute("SELECT id FROM subjects WHERE name = ?", (SUBJECT[0],)).fetchone()
+        existing = conn.execute(
+            "SELECT id FROM chapters WHERE name = ? AND parent_id IS NULL", (SUBJECT[0],)).fetchone()
         if existing:
-            print(f"Subject '{SUBJECT[0]}' already exists (id={existing['id']}); skipping seed.")
+            print(f"Topic '{SUBJECT[0]}' already exists (id={existing['id']}); skipping seed.")
             return
-        sid = conn.execute("INSERT INTO subjects (name, description) VALUES (?, ?)", SUBJECT).lastrowid
+        # The root topic is a node with parent_id NULL; chapters are its children.
+        sid = conn.execute(
+            "INSERT INTO chapters (parent_id, name, description) VALUES (NULL, ?, ?)", SUBJECT).lastrowid
         for pos, (cname, qs) in enumerate(CHAPTERS.items()):
             cid = conn.execute(
-                "INSERT INTO chapters (subject_id, name, position) VALUES (?, ?, ?)",
+                "INSERT INTO chapters (parent_id, name, position) VALUES (?, ?, ?)",
                 (sid, cname, pos)).lastrowid
             for qtype, prompt, choices, answer, expl in qs:
                 conn.execute(

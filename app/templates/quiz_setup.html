@@ -1,36 +1,39 @@
 {% extends "base.html" %}
 {% block title %}Take a quiz · FleetQuiz{% endblock %}
+
+{# Recursively render a node and its sub-tree as nested checkboxes. Picking any
+   node quizzes its WHOLE subtree, so you can choose a broad topic or drill down. #}
+{% macro render_node(n, cid, depth) %}
+  <label class="check chapter-pick" style="margin-left: {{ depth * 1.2 }}rem">
+    <input type="checkbox" name="chapter_ids" value="{{ n.id }}" data-coll="{{ cid }}">
+    {{ n.name }} <span class="muted">({{ n.question_count }} Q)</span>
+    {% if n.progress and n.progress.status not in ('empty',) %}
+      <span class="badge mastery-{{ n.progress.status }}">{{ n.progress.label }}</span>
+    {% endif %}
+  </label>
+  {% for c in n.children %}{{ render_node(c, cid, depth + 1) }}{% endfor %}
+{% endmacro %}
+
 {% block body %}
 <h1>Take a quiz</h1>
-{% if subjects %}
+{% if collections %}
 <form method="post" action="/quiz/start" class="stack card">
-  <p>Pick one or more chapters to quiz on:</p>
+  <p>Pick anything to quiz on — choosing a topic includes everything beneath it:</p>
 
-  {% for s in subjects %}
+  {% for col in collections %}
   <div class="subject-group">
     <div class="subject-head-row">
-      <h3 class="subject-head">{{ s.name }}</h3>
+      <h3 class="subject-head">{{ col.name }}</h3>
       <label class="check select-all">
-        <input type="checkbox" onclick="toggleSubject(this, {{ s.id }})">
+        <input type="checkbox" onclick="toggleColl(this, {{ col.id }})">
         Select all
       </label>
     </div>
-    {% for c in s.chapters %}
-      <label class="check chapter-pick {{ 'disabled' if c.question_count == 0 else '' }}">
-        <input type="checkbox" name="chapter_ids" value="{{ c.id }}" data-subject="{{ s.id }}"
-               {{ 'disabled' if c.question_count == 0 else '' }}>
-        {{ c.name }} <span class="muted">({{ c.question_count }} Q)</span>
-        {% if c.progress and c.progress.status not in ('empty',) %}
-          <span class="badge mastery-{{ c.progress.status }}">{{ c.progress.label }}</span>
-        {% endif %}
-      </label>
-    {% else %}
-      <p class="muted small">No chapters yet.</p>
-    {% endfor %}
+    {% for n in col.nodes %}{{ render_node(n, col.id, 0) }}{% endfor %}
   </div>
   {% endfor %}
 
-  <p class="muted small">The badge shows how many questions in a chapter you've
+  <p class="muted small">The badge shows how many questions you've
     <strong>mastered</strong> — answered correctly enough times to reach a long
     (21-day) spaced-repetition interval.</p>
 
@@ -51,17 +54,17 @@
     questions until I press <em>End quiz</em> (ignores the number above)
   </label>
   <p class="muted">Smart mode prioritises what you're due to review and
-    introduces new questions gradually, so a fresh chapter may serve fewer than you ask for.</p>
+    introduces new questions gradually, so fresh material may serve fewer than you ask for.</p>
   <button type="submit" class="primary">Start quiz →</button>
 </form>
 <script>
-function toggleSubject(box, sid) {
-  document.querySelectorAll('input[name="chapter_ids"][data-subject="' + sid + '"]:not([disabled])')
+function toggleColl(box, cid) {
+  document.querySelectorAll('input[name="chapter_ids"][data-coll="' + cid + '"]:not([disabled])')
     .forEach(cb => cb.checked = box.checked);
 }
 </script>
 {% else %}
-<p class="muted">You haven't added any subjects to your area yet.
-  <a href="/library">Go to your Library</a> to add some.</p>
+<p class="muted">Nothing to quiz on yet.
+  <a href="/library">Go to your Library</a> to create a collection and add some topics.</p>
 {% endif %}
 {% endblock %}

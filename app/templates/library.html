@@ -5,54 +5,87 @@
   <h1>Library</h1>
   <a href="/quiz" class="btn primary">Take a quiz →</a>
 </div>
-<p class="muted">Your study material — the subjects you're learning, and others you can add.</p>
+<p class="muted">Your <strong>collections</strong> are personal bundles of study material.
+  The same topic (or any sub-topic) can live in more than one collection.</p>
 
-<h2>Your subjects</h2>
-{% if subjects %}
-<div class="cards">
-  {% for s in subjects %}
-  <div class="card">
-    <h3><a href="/subjects/{{ s.id }}">{{ s.name }}</a></h3>
-    {% if s.description %}<p class="muted">{{ s.description }}</p>{% endif %}
-    <p class="meta">{{ s.chapter_count }} chapter{{ '' if s.chapter_count == 1 else 's' }}
-       · {{ s.question_count }} question{{ '' if s.question_count == 1 else 's' }}</p>
-    <form method="post" action="/subjects/{{ s.id }}/unenroll">
-      <button type="submit" class="btn small">Remove from my area</button>
+{# ---- The learner's collections ---- #}
+<h2>Your collections</h2>
+{% if collections %}
+{% for col in collections %}
+<div class="card">
+  <div class="row-between">
+    <h3>{{ col.name }}</h3>
+    <form method="post" action="/collections/{{ col.id }}/delete"
+          onsubmit="return confirm('Delete this collection? (The material itself stays.)')">
+      <button class="btn small danger">Delete collection</button>
     </form>
+  </div>
+  {% if col.nodes %}
+  <ul class="qlist">
+    {% for n in col.nodes %}
+    <li class="row-between">
+      <span><a href="/nodes/{{ n.id }}">{{ n.name }}</a>
+        <span class="muted small">· {{ n.question_count }} Q{% if n.child_count %} · {{ n.child_count }} sub-node{{ '' if n.child_count == 1 else 's' }}{% endif %}</span>
+      </span>
+      <form method="post" action="/collections/{{ col.id }}/nodes/{{ n.id }}/delete">
+        <input type="hidden" name="back" value="/library">
+        <button class="btn small">Remove</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted small">Empty — add topics from below.</p>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<p class="muted">No collections yet. Create one below, then add topics to it.</p>
+{% endif %}
+
+<div class="card">
+  <h3>New collection</h3>
+  <form method="post" action="/collections" class="inline-form">
+    <label>Name <input name="name" required placeholder="e.g. Jessica — 2nd Grade"></label>
+    <button type="submit" class="primary">Create collection</button>
+  </form>
+</div>
+
+{# ---- All topics, for browsing + adding to a collection ---- #}
+<h2>All topics</h2>
+{% if topics %}
+<div class="cards">
+  {% for t in topics %}
+  <div class="card">
+    <h3><a href="/nodes/{{ t.id }}">{{ t.name }}</a></h3>
+    {% if t.description %}<p class="muted">{{ t.description }}</p>{% endif %}
+    <p class="meta">{{ t.child_count }} sub-node{{ '' if t.child_count == 1 else 's' }}
+       · {{ t.question_count }} question{{ '' if t.question_count == 1 else 's' }}</p>
+    {% if collections %}
+    <form method="post" action="/collections/{{ collections[0].id }}/nodes" class="inline-form"
+          onsubmit="this.action='/collections/'+this.cid.value+'/nodes';">
+      <input type="hidden" name="node_id" value="{{ t.id }}">
+      <input type="hidden" name="back" value="/library">
+      <select name="cid">
+        {% for c in collections %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select>
+      <button type="submit" class="btn small primary">+ Add</button>
+    </form>
+    {% endif %}
   </div>
   {% endfor %}
 </div>
 {% else %}
-<p class="muted">You haven't added any subjects yet.
-  {% if available %}Pick one from <strong>Add to your area</strong> below to start studying.
-  {% else %}Ask an admin to create a subject first.{% endif %}</p>
+<p class="muted">No topics yet. {% if is_admin %}Create one below.{% else %}Ask an admin to create one.{% endif %}</p>
 {% endif %}
 
-{% if available %}
-<h2>Add to your area</h2>
-<p class="muted small">Add the subjects you want to study — they'll show up here and in your quizzes.</p>
-<div class="cards">
-  {% for s in available %}
-  <div class="card">
-    <h3>{{ s.name }}</h3>
-    {% if s.description %}<p class="muted">{{ s.description }}</p>{% endif %}
-    <p class="meta">{{ s.chapter_count }} chapter{{ '' if s.chapter_count == 1 else 's' }}
-       · {{ s.question_count }} question{{ '' if s.question_count == 1 else 's' }}</p>
-    <form method="post" action="/subjects/{{ s.id }}/enroll">
-      <button type="submit" class="btn primary small">+ Add to my area</button>
-    </form>
-  </div>
-  {% endfor %}
-</div>
-{% endif %}
-
-{% if user and user.is_admin %}
+{% if is_admin %}
 <div class="card">
-  <h3>New subject</h3>
-  <form method="post" action="/subjects" class="stack">
+  <h3>New topic</h3>
+  <form method="post" action="/topics" class="stack">
     <label>Name <input name="name" required placeholder="e.g. Arduino Experiments"></label>
     <label>Description <input name="description" placeholder="optional"></label>
-    <button type="submit" class="primary">Add subject</button>
+    <button type="submit" class="primary">Add topic</button>
   </form>
 </div>
 {% endif %}

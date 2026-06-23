@@ -532,4 +532,9 @@ details.chapter-block table.data { margin: .2rem 1rem 1rem; width: auto; min-wid
 .admin-row-actions { margin-top: .9rem; padding-top: .9rem; border-top: 1px solid var(--border); gap: .5rem; }
 .checkbox-row { display: flex; align-items: center; gap: .5rem; font-weight: 500; }
 
+/* Compact one-line forms: create-collection, add-to-collection, move-node. */
+.inline-form { display: flex; align-items: flex-end; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+.inline-form label { display: flex; flex-direction: column; gap: .2rem; }
+.inline-form select, .inline-form input { margin: 0; }
+
 footer { text-align: center; padding: 2.5rem 1rem; font-size: .8rem; color: var(--muted); }

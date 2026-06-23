@@ -51,6 +51,18 @@
     </div>
     {% endmacro %}
 
+    {# Recursive breakdown rows: every descendant node, indented by depth. #}
+    {% macro pchildren(nodes, depth) %}
+      {% for c in nodes %}
+      <tr>
+        <td style="padding-left: {{ (depth + 1) * 1.1 }}rem">{{ c.name }}</td>
+        <td class="topic-ch-bar">{{ pbar(c, mini=True) }}</td>
+        <td class="muted small">{{ c.mastered }}/{{ c.total }}</td>
+      </tr>
+      {{ pchildren(c.children, depth + 1) }}
+      {% endfor %}
+    {% endmacro %}
+
     {% for s in progress %}
     <div class="card topic-progress">
       <div class="row-between">
@@ -64,17 +76,11 @@
         {% if s.struggling %}<span class="lg lg-struggling">{{ s.struggling }} struggling</span>{% endif %}
         {% if s.not_started %}<span class="lg lg-new">{{ s.not_started }} not started</span>{% endif %}
       </p>
-      {% if s.chapters|length > 1 %}
+      {% if s.children %}
       <details class="topic-chapters">
-        <summary class="muted small">By chapter</summary>
+        <summary class="muted small">By sub-topic</summary>
         <table class="data">
-          {% for c in s.chapters %}
-          <tr>
-            <td>{{ c.name }}</td>
-            <td class="topic-ch-bar">{{ pbar(c, mini=True) }}</td>
-            <td class="muted small">{{ c.mastered }}/{{ c.total }}</td>
-          </tr>
-          {% endfor %}
+          {{ pchildren(s.children, 0) }}
         </table>
       </details>
       {% endif %}

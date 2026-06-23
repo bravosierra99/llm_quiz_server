@@ -14,7 +14,7 @@
 
 {% if result.questions %}
 <p>Uncheck any you don't want, edit anything that's off, then save.</p>
-<form method="post" action="/chapters/{{ chapter.id }}/generate/save">
+<form method="post" action="/nodes/{{ chapter.id }}/generate/save">
   <input type="hidden" name="count" value="{{ result.questions|length }}">
   {% if source_id %}<input type="hidden" name="source_id" value="{{ source_id }}">{% endif %}
   {% for q in result.questions %}
@@ -43,10 +43,10 @@
   {% endfor %}
   <div class="actions">
     <button type="submit" class="primary">Save kept questions</button>
-    <a class="btn" href="/chapters/{{ chapter.id }}/generate">Discard & try again</a>
+    <a class="btn" href="/nodes/{{ chapter.id }}/generate">Discard & try again</a>
   </div>
 </form>
 {% else %}
-<a class="btn primary" href="/chapters/{{ chapter.id }}/generate">← Try again</a>
+<a class="btn primary" href="/nodes/{{ chapter.id }}/generate">← Try again</a>
 {% endif %}
 {% endblock %}
