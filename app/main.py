@@ -736,6 +736,19 @@ def _session_question_ids(conn, session_id):
         (session_id,))]
 
 
+def _shuffle_choices(choices, session_id, question_id):
+    """Randomize MCQ option order so the correct answer isn't always first.
+
+    The banks were largely authored with the correct answer in position 1, and
+    answers are graded by string value (not index), so reordering is safe. The
+    seed is derived from (session, question) so the order is stable across
+    navigation / refresh within a session instead of jumping on every render.
+    """
+    out = list(choices)
+    random.Random(f"{session_id}:{question_id}").shuffle(out)
+    return out
+
+
 @app.get("/quiz/{session_id}/q/{idx}", response_class=HTMLResponse)
 def quiz_question(request: Request, session_id: int, idx: int):
     user, redirect = require_user(request)
@@ -752,6 +765,8 @@ def quiz_question(request: Request, session_id: int, idx: int):
             return RedirectResponse(f"/quiz/{session_id}/results", status_code=303)
         q = dict(conn.execute("SELECT * FROM questions WHERE id = ?", (qids[idx],)).fetchone())
     q["choices"] = jloads(q["choices"])
+    if q["type"] == "mcq":
+        q["choices"] = _shuffle_choices(q["choices"], session_id, q["id"])
     return render(request, "quiz.html", session=dict(session), q=q, idx=idx, total=len(qids))
 
 
