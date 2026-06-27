@@ -14,6 +14,9 @@
 {% if queued %}
 <p class="flash">Working on it in the background — you'll review the new questions at the end / on the Review page.</p>
 {% endif %}
+{% if request.query_params.get('requested') %}
+<p class="flash">📖 Added to your study requests — Claude will write this topic up. See it on the <a href="/study">Study</a> page.</p>
+{% endif %}
 
 <div class="card result-row {{ 'correct-row' if correct else 'wrong-row' }}">
   <span class="pill type-{{ q.type }}">{{ q.type }}</span>
