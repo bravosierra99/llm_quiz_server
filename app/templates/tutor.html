@@ -7,6 +7,9 @@
 {% if queued %}
 <p class="flash">Generating questions from this conversation in the background — approve them on the Review page shortly.</p>
 {% endif %}
+{% if request.query_params.get('requested') %}
+<p class="flash">📖 Added to your study requests — Claude will write this topic up. See it on the <a href="/study">Study</a> page.</p>
+{% endif %}
 
 <div class="card">
   <span class="pill type-{{ q.type }}">{{ q.type }}</span>
@@ -54,6 +57,15 @@
 
 <div class="actions">
   <a class="btn" href="{{ back or '/quiz' }}">← Back</a>
+  {# Escalate this per-question chat to a persistent, whole-topic written guide.
+     Topic is derived server-side from the question's chapter; lands back here with
+     a confirmation flash. #}
+  <form method="post" action="/study/request"
+        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Requested ✓';">
+    <input type="hidden" name="question_id" value="{{ question_id }}">
+    <input type="hidden" name="back" value="/tutor/{{ question_id }}">
+    <button type="submit" class="btn">📖 Get a full study guide on this topic</button>
+  </form>
   {% if is_admin %}
   {# Turn this chat into practice: feeds the whole thread to the generator and
      proposes new questions in this chapter (admin approves on the Review page). #}
