@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Study guides · FleetQuiz{% endblock %}
+{% block body %}
+<div class="row-between">
+  <h1>📚 Study guides</h1>
+  <a href="/quiz" class="btn">Take a quiz →</a>
+</div>
+<p class="muted">Whole-topic learning material to read <em>before</em> you're quizzed on it.
+  Mark one learned once it's stuck — it moves to <em>Learned</em>, it's never deleted.</p>
+
+{% if request.query_params.get('requested') %}
+<p class="flash">Got it — that topic is on the list for Claude to write up. It'll appear here once it's ready.</p>
+{% endif %}
+
+{% if to_read %}
+<h2>To read</h2>
+<div class="stack">
+  {% for g in to_read %}
+  <div class="card row-between">
+    <div>
+      <a href="/study/{{ g.slug }}" class="study-title"><strong>{{ g.title }}</strong></a>
+      {% if g.summary %}<p class="muted small">{{ g.summary }}</p>{% endif %}
+    </div>
+    <a href="/study/{{ g.slug }}" class="btn primary">Read →</a>
+  </div>
+  {% endfor %}
+</div>
+{% elif not done %}
+<div class="card">
+  <p class="muted">No study guides yet. When a quiz hits something you've never learned,
+    use <strong>“📖 Never learned this — request a full guide”</strong> on the feedback
+    screen (or the box below) and Claude will write you one.</p>
+</div>
+{% else %}
+<p class="muted">🎉 You've marked every guide learned. Nice.</p>
+{% endif %}
+
+{% if done %}
+<details class="study-done">
+  <summary><strong>Learned</strong> <span class="muted">({{ done|length }})</span></summary>
+  <div class="stack" style="margin-top: .75rem">
+    {% for g in done %}
+    <div class="card row-between done-row">
+      <a href="/study/{{ g.slug }}" class="study-title muted">{{ g.title }}</a>
+      <form method="post" action="/study/{{ g.slug }}/learned">
+        <input type="hidden" name="learned" value="0">
+        <input type="hidden" name="back" value="/study">
+        <button type="submit" class="btn small">↩ Mark unlearned</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
+<hr>
+
+<section>
+  <h2>Request a topic</h2>
+  <p class="muted small">Name something you want taught from scratch. Claude writes it up
+    and it shows up here to read.</p>
+  <form method="post" action="/study/request" class="stack card">
+    <label>Topic
+      <input type="text" name="topic" placeholder="e.g. How PWM works on an Arduino" required>
+    </label>
+    <label>Anything specific? <span class="muted small">(optional)</span>
+      <input type="text" name="note" placeholder="What confused you / how deep to go">
+    </label>
+    <button type="submit" class="btn primary">Request guide</button>
+  </form>
+
+  {% if requests %}
+  <h3>Pending requests</h3>
+  <div class="stack">
+    {% for r in requests %}
+    <div class="card row-between">
+      <div>
+        <strong>{{ r.topic }}</strong>
+        {% if r.note %}<p class="muted small">{{ r.note }}</p>{% endif %}
+        <p class="muted small">requested {{ r.created_at[:10] }}{% if r.who %} · by {{ r.who }}{% endif %}</p>
+      </div>
+      <form method="post" action="/study/requests/{{ r.id }}/dismiss">
+        <input type="hidden" name="back" value="/study">
+        <button type="submit" class="btn small">Dismiss</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

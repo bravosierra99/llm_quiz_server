@@ -538,3 +538,58 @@ details.chapter-block table.data { margin: .2rem 1rem 1rem; width: auto; min-wid
 .inline-form select, .inline-form input { margin: 0; }
 
 footer { text-align: center; padding: 2.5rem 1rem; font-size: .8rem; color: var(--muted); }
+
+/* --------------------------------------------------------------------------
+   Study guides — rendered Claude-authored markdown (.prose) + list/CTA chrome.
+   The KBs are heavy on tables, lists and headings; python-markdown emits BARE
+   <table>/<h2>/<ul>, so .prose has to style raw tags (the page's class-scoped
+   table.data styles don't reach here). Tables scroll horizontally on a phone.
+   -------------------------------------------------------------------------- */
+.prose { line-height: 1.6; overflow-wrap: break-word; }
+.prose > :first-child { margin-top: 0; }
+.prose h1, .prose h2, .prose h3, .prose h4 { line-height: 1.25; margin: 1.6rem 0 .6rem; }
+.prose h1 { font-size: 1.55rem; }
+.prose h2 { font-size: 1.3rem; border-bottom: 1px solid var(--border); padding-bottom: .3rem; }
+.prose h3 { font-size: 1.1rem; }
+.prose p, .prose ul, .prose ol { margin: .6rem 0; }
+.prose ul, .prose ol { padding-left: 1.5rem; }
+.prose li { margin: .25rem 0; }
+.prose code {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: .08em .35em; font-size: .9em;
+}
+.prose pre {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: .8rem 1rem; overflow-x: auto;
+}
+.prose pre code { background: none; border: 0; padding: 0; }
+.prose blockquote {
+  margin: .8rem 0; padding: .2rem 1rem; border-left: 3px solid var(--border-strong);
+  color: var(--muted);
+}
+.prose hr { border: 0; border-top: 1px solid var(--border); margin: 1.6rem 0; }
+.prose a { color: var(--accent); }
+/* Tables: block + overflow so a wide KB table scrolls inside the page instead of
+   widening the whole document on a phone. */
+.prose table {
+  display: block; width: max-content; max-width: 100%; overflow-x: auto;
+  border-collapse: collapse; margin: 1rem 0; font-size: .94rem;
+}
+.prose th, .prose td {
+  text-align: left; padding: .55rem .7rem; border: 1px solid var(--border);
+  vertical-align: top;
+}
+.prose th { background: var(--surface-2); color: var(--text); font-weight: 650; }
+.prose tbody tr:nth-child(even) td { background: var(--surface-2); }
+
+.study-title { color: var(--text); }
+.study-head h1 { margin: 0; }
+.study-actions { margin-top: 1.5rem; }
+.study-done { margin: 1rem 0; }
+.study-done summary { cursor: pointer; padding: .4rem 0; }
+.done-row .study-title { text-decoration: line-through; }
+.study-cta {
+  display: block; color: var(--text); text-decoration: none;
+  border-color: var(--accent); background: var(--accent-soft); transition: var(--ease);
+}
+.study-cta:hover { border-color: var(--accent-2); }

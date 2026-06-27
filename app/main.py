@@ -17,7 +17,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import ai, auth, db, importer, jobs, scheduler, sources, version
+from . import ai, auth, db, importer, jobs, scheduler, sources, study, version
 from .db import get_conn, init_db, jloads
 from .importer import import_bank_data
 
@@ -199,12 +199,15 @@ def index(request: Request):
         has_content = conn.execute(
             """SELECT 1 FROM collection_nodes cn JOIN collections c ON c.id = cn.collection_id
                WHERE c.user_id = ? LIMIT 1""", (user["id"],)).fetchone()
+        learned = _learned_slugs(conn, user["id"])
     summary = dict(totals)
     summary["pct"] = (round(summary["correct"] / summary["answered"] * 100)
                       if summary["answered"] else None)
     streak = _study_streak({date.fromisoformat(d) for d in days})
+    study_to_read = sum(1 for g in study.list_guides() if g["slug"] not in learned)
     return render(request, "home.html", recent=recent, summary=summary,
-                  streak=streak, has_subjects=bool(has_content))
+                  streak=streak, has_subjects=bool(has_content),
+                  study_to_read=study_to_read)
 
 
 @app.get("/library", response_class=HTMLResponse)
@@ -1274,6 +1277,129 @@ def tutor_generate(request: Request, question_id: int, back: str = Form("")):
     dest = _tutor_url(question_id, back)
     sep = "&" if "?" in dest else "?"
     return RedirectResponse(f"{dest}{sep}queued=1", status_code=303)
+
+
+# --------------------------------------------------------------------------
+# Study guides — whole-topic learning material (Claude-authored markdown files),
+# readable in-app, with a per-user "learned" flag. See app/study.py + db.py.
+# --------------------------------------------------------------------------
+def _learned_slugs(conn, user_id):
+    return {r["slug"] for r in conn.execute(
+        "SELECT slug FROM study_progress WHERE user_id = ? AND learned_at IS NOT NULL",
+        (user_id,))}
+
+
+@app.get("/study", response_class=HTMLResponse)
+def study_index(request: Request):
+    """The study library: every guide split into 'to read' vs 'learned', plus the
+    learner's own pending requests (and, for an admin, everyone's)."""
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    guides = study.list_guides()
+    with get_conn() as conn:
+        learned = _learned_slugs(conn, user["id"])
+        # Admin sees the whole request inbox (it's their to-do); a learner sees
+        # only their own open requests so the page stays personal.
+        if user.get("is_admin"):
+            reqs = [dict(r) for r in conn.execute(
+                """SELECT sr.*, u.name AS who FROM study_requests sr
+                   LEFT JOIN users u ON u.id = sr.user_id
+                   WHERE sr.fulfilled_at IS NULL ORDER BY sr.created_at DESC""")]
+        else:
+            reqs = [dict(r) for r in conn.execute(
+                """SELECT * FROM study_requests
+                   WHERE user_id = ? AND fulfilled_at IS NULL
+                   ORDER BY created_at DESC""", (user["id"],))]
+    to_read = [g for g in guides if g["slug"] not in learned]
+    done = [g for g in guides if g["slug"] in learned]
+    return render(request, "study_list.html", to_read=to_read, done=done,
+                  requests=reqs)
+
+
+@app.get("/study/{slug}", response_class=HTMLResponse)
+def study_guide(request: Request, slug: str):
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    guide = study.get_guide(slug)
+    if not guide:
+        return RedirectResponse("/study", status_code=303)
+    with get_conn() as conn:
+        learned = slug in _learned_slugs(conn, user["id"])
+    return render(request, "study_guide.html", guide=guide, learned=learned)
+
+
+@app.post("/study/{slug}/learned")
+def study_set_learned(request: Request, slug: str, learned: str = Form("1"),
+                      back: str = Form("/study")):
+    """Toggle the per-user 'learned' flag (reversible hide, never deletes the
+    guide). Upsert so a later un-learn just nulls the timestamp."""
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    if not study.get_guide(slug):
+        return RedirectResponse("/study", status_code=303)
+    stamp = "datetime('now')" if learned == "1" else "NULL"
+    with get_conn() as conn:
+        conn.execute(
+            f"""INSERT INTO study_progress (user_id, slug, learned_at)
+                VALUES (?, ?, {stamp})
+                ON CONFLICT(user_id, slug) DO UPDATE SET learned_at = {stamp}""",
+            (user["id"], slug))
+    return RedirectResponse(_safe_back(back), status_code=303)
+
+
+@app.post("/study/request")
+def study_request(request: Request, topic: str = Form(""), note: str = Form(""),
+                  question_id: str = Form(""), back: str = Form("/study")):
+    """A learner names a topic they want Claude to write up (often straight off a
+    quiz question they never learned). Dumb capture — no auto-matching; Claude
+    reads these via db-pull and fulfils them by committing a guide file."""
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    topic = topic.strip()
+    qid = int(question_id) if question_id.strip().isdigit() else None
+    with get_conn() as conn:
+        # Frictionless quiz-feedback path: no typed topic, just the question id —
+        # derive the topic from that question's chapter (and its root, for context).
+        if not topic and qid:
+            row = conn.execute(
+                "SELECT chapter_id FROM questions WHERE id = ?", (qid,)).fetchone()
+            if row:
+                ch = conn.execute("SELECT name FROM chapters WHERE id = ?",
+                                  (row["chapter_id"],)).fetchone()
+                root_id = db.node_root_id(conn, row["chapter_id"])
+                root = conn.execute("SELECT name FROM chapters WHERE id = ?",
+                                    (root_id,)).fetchone() if root_id else None
+                names = [n["name"] for n in (root, ch) if n]
+                # "Wine — Tasting" style; drop the root if it duplicates the chapter.
+                topic = " — ".join(dict.fromkeys(names)) if names else ""
+        if topic:
+            conn.execute(
+                """INSERT INTO study_requests (topic, note, user_id, question_id)
+                   VALUES (?, ?, ?, ?)""",
+                (topic, note.strip(), user["id"], qid))
+    dest = _safe_back(back)
+    sep = "&" if "?" in dest else "?"
+    return RedirectResponse(f"{dest}{sep}requested=1", status_code=303)
+
+
+@app.post("/study/requests/{req_id}/dismiss")
+def study_request_dismiss(request: Request, req_id: int, back: str = Form("/study")):
+    """Mark a request handled. A learner can clear their own; an admin can clear any."""
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        if user.get("is_admin"):
+            conn.execute("UPDATE study_requests SET fulfilled_at = datetime('now') "
+                         "WHERE id = ?", (req_id,))
+        else:
+            conn.execute("UPDATE study_requests SET fulfilled_at = datetime('now') "
+                         "WHERE id = ? AND user_id = ?", (req_id, user["id"]))
+    return RedirectResponse(_safe_back(back), status_code=303)
 
 
 @app.get("/history", response_class=HTMLResponse)

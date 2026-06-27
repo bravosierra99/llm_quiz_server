@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ guide.title }} · FleetQuiz{% endblock %}
+{% block body %}
+<p class="muted small"><a href="/study">← All study guides</a></p>
+
+<div class="row-between study-head">
+  <h1>{{ guide.title }}</h1>
+  {% if learned %}<span class="badge mastery-mastered">Learned</span>{% endif %}
+</div>
+
+{# Content is Claude-authored markdown, rendered to HTML server-side and trusted. #}
+<article class="prose">{{ guide.html | safe }}</article>
+
+<div class="actions study-actions">
+  {% if learned %}
+  <form method="post" action="/study/{{ guide.slug }}/learned">
+    <input type="hidden" name="learned" value="0">
+    <input type="hidden" name="back" value="/study/{{ guide.slug }}">
+    <button type="submit" class="btn">↩ Mark unlearned</button>
+  </form>
+  {% else %}
+  <form method="post" action="/study/{{ guide.slug }}/learned">
+    <input type="hidden" name="learned" value="1">
+    <input type="hidden" name="back" value="/study">
+    <button type="submit" class="btn primary">✓ I've learned this</button>
+  </form>
+  {% endif %}
+  <a class="btn" href="/study">Back to guides</a>
+  <a class="btn" href="/quiz">Quiz me on it →</a>
+</div>
+{% endblock %}

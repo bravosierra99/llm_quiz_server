@@ -7,6 +7,12 @@
   <a href="/quiz" class="btn primary">Take a quiz →</a>
 </div>
 
+{% if study_to_read %}
+<a href="/study" class="card study-cta">
+  📚 You have <strong>{{ study_to_read }}</strong> study guide{{ 's' if study_to_read != 1 }} to read →
+</a>
+{% endif %}
+
 {% if summary.quizzes %}
 <div class="kpi-grid">
   <div class="kpi">

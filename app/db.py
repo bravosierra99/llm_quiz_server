@@ -196,6 +196,34 @@ CREATE TABLE IF NOT EXISTS tutor_messages (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Whole-topic study guides ("teach me the whole topic, save it so I can read it,
+-- let me mark it learned"). The GUIDE CONTENT is NOT in the DB: guides are
+-- Claude-authored markdown files baked into the image at app/study/*.md, so the
+-- filesystem is the catalog and a guide ships with the code (see app/study.py).
+-- Only two things are per-DB: a learner's "I've learned this" flag (keyed by the
+-- file's stable slug, mirroring review_state's per-user shape) and a lightweight
+-- inbox of topics a learner asked Claude to write up.
+CREATE TABLE IF NOT EXISTS study_progress (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    slug       TEXT NOT NULL,            -- study guide filename stem (stable key)
+    learned_at TEXT,
+    PRIMARY KEY (user_id, slug)
+);
+
+-- A dumb capture inbox: a learner names a topic they want taught (often straight
+-- off a quiz question they never learned). Claude reads these via db-pull and
+-- fulfils them by committing a new app/study/*.md file; there is deliberately NO
+-- automatic request->guide matching. fulfilled_at lets a row be dismissed by hand.
+CREATE TABLE IF NOT EXISTS study_requests (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic        TEXT NOT NULL,
+    note         TEXT NOT NULL DEFAULT '',
+    user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    question_id  INTEGER REFERENCES questions(id) ON DELETE SET NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    fulfilled_at TEXT
+);
+
 """
 
 # Indexes are created AFTER table DDL and AFTER migrations (see init_db), because
@@ -214,6 +242,8 @@ CREATE INDEX IF NOT EXISTS idx_answers_session ON answers(session_id);
 CREATE INDEX IF NOT EXISTS idx_answers_question ON answers(question_id);
 CREATE INDEX IF NOT EXISTS idx_review_user ON review_state(user_id);
 CREATE INDEX IF NOT EXISTS idx_review_question ON review_state(question_id);
+CREATE INDEX IF NOT EXISTS idx_study_progress_user ON study_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_study_requests_open ON study_requests(fulfilled_at);
 """
 
 

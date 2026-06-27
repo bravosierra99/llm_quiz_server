@@ -57,6 +57,16 @@
     <button type="submit" class="btn">📚 Teach me this topic</button>
   </form>
 
+  {# Persistent whole-topic study guide (vs the per-question tutor chat above):
+     capture this as a request for Claude to write up. Topic is derived server-side
+     from the question's chapter. Plain POST→redirect, like the tutor forms. #}
+  <form method="post" action="/study/request"
+        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Requested ✓';">
+    <input type="hidden" name="question_id" value="{{ q.id }}">
+    <input type="hidden" name="back" value="{{ back }}">
+    <button type="submit" class="btn">📖 Never learned this — request a full guide</button>
+  </form>
+
   <form method="post" action="/questions/{{ q.id }}/master">
     <input type="hidden" name="back" value="{{ back }}">
     <button type="submit" class="btn">😎 Too easy — mark mastered</button>

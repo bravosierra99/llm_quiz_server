@@ -5,6 +5,8 @@ python-multipart==0.0.20
 httpx==0.28.1
 itsdangerous==2.2.0
 pypdf==5.1.0
+# Renders Claude-authored study-guide markdown (tables/lists/headings) to HTML.
+markdown==3.10.2
 # Keyless web search — shared helper (pulls ddgs transitively). Installed from the
 # tag tarball (not git+https) so the slim image needs no `git`; public repo, so no
 # token in the build. Pinned to v0.1.0 for reproducible container builds.
