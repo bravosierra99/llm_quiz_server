@@ -63,7 +63,9 @@
   <form method="post" action="/study/request"
         onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Requested ✓';">
     <input type="hidden" name="question_id" value="{{ question_id }}">
-    <input type="hidden" name="back" value="/tutor/{{ question_id }}">
+    {# Land back on THIS tutor thread, but keep the original `back` (the quiz screen)
+       embedded so the "← Back" link still returns to the in-progress quiz. #}
+    <input type="hidden" name="back" value="/tutor/{{ question_id }}{% if back %}?back={{ back|urlencode }}{% endif %}">
     <button type="submit" class="btn">📖 Get a full study guide on this topic</button>
   </form>
   {% if is_admin %}
