@@ -399,6 +399,10 @@ table.data tr.group-head:hover td { background: var(--surface-2); }
 .subject-head-row .select-all { font-size: .85rem; color: var(--muted); }
 .chapter-pick { display: flex; align-items: center; gap: .5rem; padding: .35rem 0; }
 .chapter-pick.disabled { opacity: .45; }
+/* Quiz-setup: collapsible libraries (reuses details.subject-block styling). */
+details.collection-pick > summary .sum-right { display: flex; align-items: center; gap: 1rem; }
+details.collection-pick > summary .select-all { font-size: .85rem; color: var(--muted); font-weight: 500; }
+.collection-body { padding: .2rem 1rem .7rem; }
 .check, .radio { display: inline-flex; align-items: center; gap: .5rem; }
 .check input, .radio input { width: auto; margin: 0; accent-color: var(--accent); }
 .tabs { display: flex; gap: 1.2rem; }

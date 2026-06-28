@@ -18,19 +18,32 @@
 <h1>Take a quiz</h1>
 {% if collections %}
 <form method="post" action="/quiz/start" class="stack card">
-  <p>Pick anything to quiz on — choosing a topic includes everything beneath it:</p>
+  <p>Pick anything to quiz on — choosing a topic includes everything beneath it.
+    Tick <strong>Select all</strong> to grab a whole library (it counts even while
+    the library is collapsed), or open one to drill into single topics.</p>
 
   {% for col in collections %}
-  <div class="subject-group">
-    <div class="subject-head-row">
-      <h3 class="subject-head">{{ col.name }}</h3>
-      <label class="check select-all">
-        <input type="checkbox" onclick="toggleColl(this, {{ col.id }})">
-        Select all
-      </label>
+  <details class="subject-block collection-pick"{% if collections|length == 1 %} open{% endif %}>
+    <summary>
+      <span class="sum-name">{{ col.name }}</span>
+      <span class="sum-right">
+        <span class="sum-stat">{{ col.nodes | sum(attribute='question_count') }} Q</span>
+        {# stopPropagation on BOTH the label and the input so ticking Select all
+           never toggles the disclosure panel (label clicks forward to the input,
+           so the label needs its own guard). onchange fires on the real state
+           change, not the swallowed synthetic clicks. #}
+        <label class="check select-all" onclick="event.stopPropagation()">
+          <input type="checkbox" data-coll-all="{{ col.id }}"
+                 onclick="event.stopPropagation()"
+                 onchange="toggleColl(this, {{ col.id }})">
+          Select all
+        </label>
+      </span>
+    </summary>
+    <div class="collection-body">
+      {% for n in col.nodes %}{{ render_node(n, col.id, 0) }}{% endfor %}
     </div>
-    {% for n in col.nodes %}{{ render_node(n, col.id, 0) }}{% endfor %}
-  </div>
+  </details>
   {% endfor %}
 
   <p class="muted small">The badge shows how many questions you've
