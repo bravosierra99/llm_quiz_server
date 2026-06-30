@@ -12,3 +12,24 @@
     {%- if sub %} <span class="muted">{{ sub }}</span>{% endif -%}
   {%- endif -%}
 {%- endmacro %}
+
+{# Request a whole-topic study guide for the question's chapter. Renders as a
+   button in the action row; clicking it expands an OPTIONAL context box so the
+   learner can tell Claude what confused them / how deep to go — the same extra
+   steer they'd give in a cold-call request. The topic is still derived
+   server-side from the question; the note only adds context (route accepts it). #}
+{% macro request_guide(question_id, back, label='📖 Request a full study guide') -%}
+<details class="request-guide">
+  <summary class="btn">{{ label }}</summary>
+  <form method="post" action="/study/request" class="request-panel"
+        onsubmit="this.querySelector('button[type=submit]').disabled=true; this.querySelector('button[type=submit]').textContent='Requested ✓';">
+    <input type="hidden" name="question_id" value="{{ question_id }}">
+    <input type="hidden" name="back" value="{{ back }}">
+    <label>Anything to tell Claude? <span class="muted small">(optional)</span>
+      <textarea name="note" rows="2"
+        placeholder="What confused you, how deep to go, what to focus on…"></textarea>
+    </label>
+    <button type="submit" class="btn primary small">Request guide</button>
+  </form>
+</details>
+{%- endmacro %}

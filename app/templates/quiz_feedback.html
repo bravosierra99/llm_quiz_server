@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}{{ 'Correct' if answer and answer.is_correct else 'Review' }} · FleetQuiz{% endblock %}
 {% block body %}
 <div id="quiz-stage"
@@ -15,7 +16,7 @@
 <p class="flash">Working on it in the background — you'll review the new questions at the end / on the Review page.</p>
 {% endif %}
 {% if request.query_params.get('requested') %}
-<p class="flash">📖 Added to your study requests — Claude will write this topic up. See it on the <a href="/study">Study</a> page.</p>
+<p class="flash">📖 Queued for Claude to write up — it'll appear on the <a href="/study">Study</a> page once it's ready (not instant).</p>
 {% endif %}
 
 <div class="card result-row {{ 'correct-row' if correct else 'wrong-row' }}">
@@ -62,13 +63,8 @@
 
   {# Persistent whole-topic study guide (vs the per-question tutor chat above):
      capture this as a request for Claude to write up. Topic is derived server-side
-     from the question's chapter. Plain POST→redirect, like the tutor forms. #}
-  <form method="post" action="/study/request"
-        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Requested ✓';">
-    <input type="hidden" name="question_id" value="{{ q.id }}">
-    <input type="hidden" name="back" value="{{ back }}">
-    <button type="submit" class="btn">📖 Never learned this — request a full guide</button>
-  </form>
+     from the question's chapter; the macro adds an optional context box. #}
+  {{ ui.request_guide(q.id, back, '📖 Never learned this — request a full guide') }}
 
   <form method="post" action="/questions/{{ q.id }}/master">
     <input type="hidden" name="back" value="{{ back }}">

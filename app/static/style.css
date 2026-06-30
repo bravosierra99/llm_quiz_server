@@ -521,6 +521,22 @@ details.chapter-block table.data { margin: .2rem 1rem 1rem; width: auto; min-wid
 .sum-stat { color: var(--muted); font-size: .85rem; font-weight: 500; white-space: nowrap; }
 .weak-flag { color: var(--danger); font-weight: 650; }
 
+/* Study-guide request: a button (the <summary>) that expands an optional context
+   box. Sits in the .actions/.feedback-actions flex row; when open it claims a full
+   row so the textarea isn't crushed into a narrow flex item. The summary is styled
+   as a .btn, so suppress the global disclosure triangle for it. */
+details.request-guide > summary { list-style: none; cursor: pointer; }
+details.request-guide > summary::before { content: none; }
+details.request-guide[open] { flex-basis: 100%; }
+.request-panel {
+  display: flex; flex-direction: column; gap: .5rem; align-items: flex-start;
+  margin-top: .6rem; padding: .8rem; max-width: 32rem;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.request-panel label { width: 100%; font-size: .9rem; }
+.request-panel textarea { width: 100%; margin-top: .3rem; resize: vertical; }
+
 /* Impersonation banner — sticky, hard to miss, so you always know you're
    acting as someone and can get back in one click. */
 .impersonation-banner {

@@ -71,6 +71,8 @@
 
   {% if requests %}
   <h3>Pending requests</h3>
+  <p class="muted small">These wait for Claude to write the guide (it isn't automatic).
+    Once a guide for one shows up above, <strong>Dismiss</strong> the request to clear it.</p>
   <div class="stack">
     {% for r in requests %}
     <div class="card row-between">

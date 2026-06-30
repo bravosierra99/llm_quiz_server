@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}Tutor · FleetQuiz{% endblock %}
 {% block body %}
 <p class="muted"><a href="{{ back or '/quiz' }}">← Back</a></p>
@@ -8,7 +9,7 @@
 <p class="flash">Generating questions from this conversation in the background — approve them on the Review page shortly.</p>
 {% endif %}
 {% if request.query_params.get('requested') %}
-<p class="flash">📖 Added to your study requests — Claude will write this topic up. See it on the <a href="/study">Study</a> page.</p>
+<p class="flash">📖 Queued for Claude to write up — it'll appear on the <a href="/study">Study</a> page once it's ready (not instant).</p>
 {% endif %}
 
 <div class="card">
@@ -58,16 +59,12 @@
 <div class="actions">
   <a class="btn" href="{{ back or '/quiz' }}">← Back</a>
   {# Escalate this per-question chat to a persistent, whole-topic written guide.
-     Topic is derived server-side from the question's chapter; lands back here with
-     a confirmation flash. #}
-  <form method="post" action="/study/request"
-        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Requested ✓';">
-    <input type="hidden" name="question_id" value="{{ question_id }}">
-    {# Land back on THIS tutor thread, but keep the original `back` (the quiz screen)
-       embedded so the "← Back" link still returns to the in-progress quiz. #}
-    <input type="hidden" name="back" value="/tutor/{{ question_id }}{% if back %}?back={{ back|urlencode }}{% endif %}">
-    <button type="submit" class="btn">📖 Get a full study guide on this topic</button>
-  </form>
+     Topic is derived server-side from the question's chapter; the macro adds an
+     optional context box and lands back here with a confirmation flash. The `back`
+     keeps the original quiz screen embedded so "← Back" still returns to it. #}
+  {{ ui.request_guide(question_id,
+       '/tutor/' ~ question_id ~ ('?back=' ~ (back|urlencode) if back else ''),
+       '📖 Get a full study guide on this topic') }}
   {% if is_admin %}
   {# Turn this chat into practice: feeds the whole thread to the generator and
      proposes new questions in this chapter (admin approves on the Review page). #}
