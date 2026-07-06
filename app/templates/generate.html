@@ -67,12 +67,5 @@
   <p class="muted small">This calls the local AI model and can take 10–60s.</p>
 </form>
 
-<script>
-function syncMode() {
-  const source = document.querySelector('input[name=mode][value=source]').checked;
-  document.getElementById('source-field').style.display = source ? '' : 'none';
-  document.getElementById('topic-field').style.display = source ? 'none' : '';
-}
-syncMode();
-</script>
+<script src="/static/js/generate.js"></script>
 {% endblock %}

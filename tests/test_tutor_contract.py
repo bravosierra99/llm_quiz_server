@@ -1,9 +1,10 @@
 """Frontend↔backend contract for the tutor fetch calls.
 
-The payloads here are COPIED FROM app/templates/tutor.html's JS (URLSearchParams
+The payloads here are COPIED FROM app/static/js/tutor.js (URLSearchParams
 bodies + Accept: application/json), not from the route signatures — if either
 side drifts, these fail. The JS reads `data.reply` and `data.skipped`; those
-exact keys are asserted."""
+exact keys are asserted. tests/js/tutor.test.js pins the same shapes from the
+JS side."""
 import pytest
 
 from app import ai, db
@@ -82,6 +83,24 @@ def test_seed_then_reseed_is_skipped(client, kid, bank, mock_tutor):
                      content="mode=teach&back=/quiz")
     assert r2.json().get("skipped") is True
     assert len(mock_tutor) == 1
+
+
+def test_rendered_page_has_every_hook_the_js_reads(client, kid, bank, mock_tutor):
+    """tests/js/tutor.test.js runs against a hand-built DOM — if the TEMPLATE
+    dropped a hook tutor.js needs, that suite would stay green. This pins the
+    rendered page to the selectors/attributes the script actually reads."""
+    qid = bank["questions"][0]["id"]
+    r = client.get(f"/tutor/{qid}?seed=teach&session_id=3&back=/quiz", headers=kid)
+    assert r.status_code == 200
+    html = r.text
+    assert 'src="/static/js/tutor.js"' in html
+    assert 'id="tutor-form"' in html and f'data-question-id="{qid}"' in html
+    assert 'id="tutor-thread"' in html and 'class="muted tutor-empty"' in html
+    assert 'name="back"' in html and 'name="message"' in html
+    # Auto-seed hooks (only rendered on an empty thread arriving with ?seed=).
+    assert 'id="tutor-seed"' in html
+    assert 'data-mode="teach"' in html and 'data-session="3"' in html
+    assert "data-intent=" in html
 
 
 def test_seed_full_page_post_redirects_instantly(client, kid, bank, mock_tutor):

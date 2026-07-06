@@ -47,11 +47,5 @@
   </div>
 </form>
 
-<script>
-function syncType() {
-  const t = document.getElementById('qtype').value;
-  document.getElementById('choices-field').style.display = (t === 'mcq') ? '' : 'none';
-}
-syncType();
-</script>
+<script src="/static/js/question-edit.js"></script>
 {% endblock %}

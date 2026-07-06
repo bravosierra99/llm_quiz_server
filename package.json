@@ -1,0 +1,12 @@
+{
+  "name": "fleetquiz-js-tests",
+  "private": true,
+  "description": "Test runner for app/static/js — the app itself has no JS build step.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0",
+    "vitest": "^3.2.4"
+  }
+}

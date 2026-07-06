@@ -79,13 +79,19 @@ QUIZ_DB_PATH=./data/quiz.db uvicorn app.main:app --reload --port 8080
 
 ```bash
 uv run --with-requirements requirements.txt --with pytest pytest -q   # ~2s, no LLM needed
+npm install && npx vitest run                                         # JS unit tests (jsdom)
 uvx ruff check app tests
 ```
 
-The suite runs against a throwaway SQLite DB with all AI calls mocked; tests
-marked `requires_lm_studio` hit the real endpoint and auto-skip when it's
-unreachable. `scripts/version-bump.sh` runs both as its pre-release gate, and
-CI (`.github/workflows/ci.yml`) runs the same commands on every push to main.
+The Python suite runs against a throwaway SQLite DB with all AI calls mocked;
+tests marked `requires_lm_studio` hit the real endpoint and auto-skip when it's
+unreachable. Frontend logic lives in `app/static/js/` (never inline in
+templates — server values cross over via `data-` attributes) and is tested with
+vitest + jsdom in `tests/js/`; the tutor payload shapes are pinned on both
+sides (`tests/js/tutor.test.js` asserts what the JS sends,
+`tests/test_tutor_contract.py` feeds the same shapes to the real routes).
+`scripts/version-bump.sh` runs all of it as its pre-release gate, and CI
+(`.github/workflows/ci.yml`) runs the same commands on every push to main.
 
 ## Configuration (env / `.env`)
 

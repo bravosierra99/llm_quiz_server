@@ -15,3 +15,6 @@ data/
 # Generated study artifacts (knowledge bases + question banks)
 research/
 banks/
+
+# JS test runner (vitest) — deps only, no build step
+node_modules/

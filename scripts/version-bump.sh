@@ -109,6 +109,14 @@ PY
     else
         echo -e "${YELLOW}  → no tests/ dir — skipping pytest${NC}"
     fi
+    if [ -f package.json ]; then
+        echo -e "${BLUE}  → vitest (JS)${NC}"
+        [ -d node_modules ] || npm install --no-fund --no-audit --loglevel=error
+        npx vitest run --silent \
+            || { echo -e "${RED}✗ JS tests failed — aborting (override: --skip-tests).${NC}"; exit 1; }
+    else
+        echo -e "${YELLOW}  → no package.json — skipping JS tests${NC}"
+    fi
     if [ -f ruff.toml ] || grep -q '^\[tool.ruff' pyproject.toml 2>/dev/null; then
         echo -e "${BLUE}  → ruff${NC}"
         uvx ruff check app tests \

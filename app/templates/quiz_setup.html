@@ -70,12 +70,7 @@
     introduces new questions gradually, so fresh material may serve fewer than you ask for.</p>
   <button type="submit" class="primary">Start quiz →</button>
 </form>
-<script>
-function toggleColl(box, cid) {
-  document.querySelectorAll('input[name="chapter_ids"][data-coll="' + cid + '"]:not([disabled])')
-    .forEach(cb => cb.checked = box.checked);
-}
-</script>
+<script src="/static/js/quiz-setup.js"></script>
 {% else %}
 <p class="muted">Nothing to quiz on yet.
   <a href="/library">Go to your Library</a> to create a collection and add some topics.</p>
