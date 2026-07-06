@@ -111,7 +111,7 @@ PY
     fi
     if [ -f ruff.toml ] || grep -q '^\[tool.ruff' pyproject.toml 2>/dev/null; then
         echo -e "${BLUE}  → ruff${NC}"
-        uvx ruff check app \
+        uvx ruff check app tests \
             || { echo -e "${RED}✗ Lint failed — aborting (override: --skip-tests).${NC}"; exit 1; }
     else
         echo -e "${YELLOW}  → no ruff config — skipping lint${NC}"

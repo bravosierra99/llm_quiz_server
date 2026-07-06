@@ -163,7 +163,7 @@ def generate_questions(mode, topic, source_text, num_questions, difficulty, type
 
     raw_text = None
     last_err = None
-    for attempt in range(2):  # one retry on hard parse failure
+    for _attempt in range(2):  # one retry on hard parse failure
         try:
             raw_text = _chat(messages)
         except (httpx.HTTPError, KeyError, IndexError) as e:

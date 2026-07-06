@@ -1,0 +1,38 @@
+# CI mirrors the local pre-release gate (scripts/version-bump.sh) — the SAME
+# commands, nothing CI-only. Live-LLM tests are marked requires_lm_studio and
+# auto-skip here (no LM Studio in a runner), which is exactly the local
+# behavior when the GPU box is off.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Byte-compile app/
+        run: uv run --with-requirements requirements.txt python -m compileall -q app
+
+      - name: Parse templates
+        run: |
+          uv run --with-requirements requirements.txt python - <<'PY'
+          from pathlib import Path
+          from jinja2 import Environment, FileSystemLoader
+          env = Environment(loader=FileSystemLoader("app/templates"))
+          for t in sorted(Path("app/templates").glob("*.html")):
+              env.get_template(t.name)
+          print("templates ok")
+          PY
+
+      - name: Tests
+        run: uv run --with-requirements requirements.txt --with pytest pytest -q
+
+      - name: Lint
+        run: uvx ruff check app tests

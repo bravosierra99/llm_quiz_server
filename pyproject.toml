@@ -13,3 +13,25 @@ requires-python = ">=3.12"
 # backend and nothing imports it as one. Without this, `uv run` would attempt to
 # build the project and fail. We only ever use `uv run --with-requirements ...`.
 package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]  # `app` is imported from the repo root, not installed
+markers = [
+    "requires_lm_studio: live-LLM test; auto-skipped when the AI endpoint is unreachable",
+]
+
+[tool.ruff]
+target-version = "py312"
+# Long lines are deliberate in this codebase (SQL, prose comments); E501 is off
+# by staying out of the selected rules. This config's existence is what turns on
+# the ruff step in scripts/version-bump.sh and CI.
+
+[tool.ruff.lint]
+# Defaults (E4/E7/E9, F) plus bugbear-ish safety nets that catch real defects.
+extend-select = ["B", "UP", "SIM"]
+ignore = [
+    "B008",   # FastAPI's Form(...) / File(...) defaults-in-signature idiom
+    "SIM105", # try/except/pass is clearer than contextlib.suppress in hot paths
+    "SIM108", # ternaries aren't always clearer than if/else
+]

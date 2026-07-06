@@ -75,6 +75,18 @@ QUIZ_DB_PATH=./data/quiz.db python -m seed
 QUIZ_DB_PATH=./data/quiz.db uvicorn app.main:app --reload --port 8080
 ```
 
+## Tests & lint
+
+```bash
+uv run --with-requirements requirements.txt --with pytest pytest -q   # ~2s, no LLM needed
+uvx ruff check app tests
+```
+
+The suite runs against a throwaway SQLite DB with all AI calls mocked; tests
+marked `requires_lm_studio` hit the real endpoint and auto-skip when it's
+unreachable. `scripts/version-bump.sh` runs both as its pre-release gate, and
+CI (`.github/workflows/ci.yml`) runs the same commands on every push to main.
+
 ## Configuration (env / `.env`)
 
 | Var | Default | Purpose |

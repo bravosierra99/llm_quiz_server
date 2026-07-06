@@ -8,10 +8,10 @@ generation, and the quiz loop.
 import json
 import os
 import random
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, UTC
 from urllib.parse import quote, urlencode
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                PlainTextResponse, RedirectResponse)
 from fastapi.staticfiles import StaticFiles
@@ -103,7 +103,7 @@ def _study_streak(days: set) -> int:
     it. Bucketed on the same UTC date the rest of the app displays."""
     if not days:
         return 0
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     cur = today if today in days else today - timedelta(days=1)
     if cur not in days:
         return 0
@@ -1425,7 +1425,7 @@ def history(request: Request):
     # Bucket each session by a time label so the page reads as grouped runs
     # instead of one undifferentiated list. Bucket on the SAME (UTC) date we
     # display (finished_at[:10]) so the header can never disagree with the row.
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     for s in sessions:
         d = date.fromisoformat(s["finished_at"][:10])
         delta = (today - d).days
