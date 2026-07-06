@@ -109,6 +109,11 @@ PY
     else
         echo -e "${YELLOW}  → no tests/ dir — skipping pytest${NC}"
     fi
+    if [ -d tests/e2e ]; then
+        echo -e "${BLUE}  → playwright e2e smokes${NC}"
+        $RUN --with pytest --with pytest-playwright pytest tests/e2e -q \
+            || { echo -e "${RED}✗ e2e smokes failed — aborting (override: --skip-tests).${NC}"; exit 1; }
+    fi
     if [ -f package.json ]; then
         echo -e "${BLUE}  → vitest (JS)${NC}"
         [ -d node_modules ] || npm install --no-fund --no-audit --loglevel=error

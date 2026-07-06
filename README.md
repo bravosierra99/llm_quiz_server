@@ -80,6 +80,8 @@ QUIZ_DB_PATH=./data/quiz.db uvicorn app.main:app --reload --port 8080
 ```bash
 uv run --with-requirements requirements.txt --with pytest pytest -q   # ~2s, no LLM needed
 npm install && npx vitest run                                         # JS unit tests (jsdom)
+uv run --with-requirements requirements.txt --with pytest \
+    --with pytest-playwright pytest tests/e2e -q                      # browser e2e smokes (~5s)
 uvx ruff check app tests
 ```
 
@@ -90,6 +92,18 @@ templates — server values cross over via `data-` attributes) and is tested wit
 vitest + jsdom in `tests/js/`; the tutor payload shapes are pinned on both
 sides (`tests/js/tutor.test.js` asserts what the JS sends,
 `tests/test_tutor_contract.py` feeds the same shapes to the real routes).
+Three Playwright smokes in `tests/e2e/` drive a real Chromium against a real
+uvicorn subprocess (own seeded DB, dead AI endpoint so the tutor's degraded
+path is what's asserted) — they auto-skip unless `pytest-playwright` is
+installed, so the fast suite stays browser-free. Selectors are stable
+ids/names, never UI copy. First run needs `playwright install chromium`.
+
+`tests/test_prod_smoke.py` is an opt-in, **read-only** suite that hits the
+*deployed* app through Cloudflare Access using a service token — see its
+docstring for the one-time token setup and the env vars
+(`RUN_PROD_SMOKE=1`, `PROD_SMOKE_URL`, `CF_ACCESS_CLIENT_ID/SECRET`); keep
+them in an untracked `.env`.
+
 `scripts/version-bump.sh` runs all of it as its pre-release gate, and CI
 (`.github/workflows/ci.yml`) runs the same commands on every push to main.
 

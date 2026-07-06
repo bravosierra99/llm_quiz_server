@@ -34,7 +34,7 @@
       {% endfor %}
     </div>
     <div class="actions">
-      <button type="submit" class="primary">Submit</button>
+      <button type="submit" class="primary" id="submit-answer">Submit</button>
       <button type="submit" class="btn danger" name="dont_know" value="1" formnovalidate>I don't know</button>
     </div>
   </form>
@@ -57,8 +57,8 @@
       {% if q.explanation %}<p class="muted">{{ q.explanation }}</p>{% endif %}
       <p>Did you get it right?</p>
       <div class="actions">
-        <button type="submit" class="primary" onclick="setSelf('yes')">✓ Got it</button>
-        <button type="submit" class="btn danger" onclick="setSelf('no')">✗ Missed it</button>
+        <button type="submit" class="primary" id="grade-got-it" onclick="setSelf('yes')">✓ Got it</button>
+        <button type="submit" class="btn danger" id="grade-missed" onclick="setSelf('no')">✗ Missed it</button>
       </div>
     </div>
   </form>

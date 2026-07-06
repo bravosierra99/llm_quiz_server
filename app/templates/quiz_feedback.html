@@ -30,11 +30,12 @@
 </div>
 
 <div class="actions feedback-actions">
+  {# One #advance per page (the branches are exclusive): "the way forward". #}
   {% if has_next %}
-    <a class="btn primary" href="/quiz/{{ session.id }}/q/{{ idx + 1 }}"
+    <a class="btn primary" id="advance" href="/quiz/{{ session.id }}/q/{{ idx + 1 }}"
        hx-get="/quiz/{{ session.id }}/q/{{ idx + 1 }}">Next →</a>
   {% else %}
-    <a class="btn primary" href="/quiz/{{ session.id }}/results"
+    <a class="btn primary" id="advance" href="/quiz/{{ session.id }}/results"
        hx-get="/quiz/{{ session.id }}/results">See results →</a>
   {% endif %}
 

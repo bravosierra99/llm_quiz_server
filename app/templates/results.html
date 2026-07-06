@@ -6,7 +6,7 @@
 {% set pct = (correct / total * 100)|round(0, 'floor') if total else 0 %}
 <h1>Results</h1>
 <div class="score-banner {{ 'good' if pct >= 80 else ('ok' if pct >= 50 else 'low') }}">
-  <span class="big">{{ correct }}/{{ total }}</span>
+  <span class="big" id="score">{{ correct }}/{{ total }}</span>
   <span>{{ pct }}%</span>
   <span class="muted">{{ session.label }}</span>
 </div>
