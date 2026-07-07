@@ -1,4 +1,4 @@
-"""In-process background LLM jobs (generate-more, flag-fix).
+"""In-process background LLM jobs (generate-more, flag-fix, write-guide).
 
 A single daemon worker thread drains a queue and runs jobs one at a time (the
 local model is single-stream). Jobs are persisted in the `jobs` table and
@@ -18,7 +18,7 @@ import os
 import queue
 import threading
 
-from . import ai, search, sources
+from . import ai, search, sources, study
 from .db import get_conn, jloads, node_root_id
 
 _Q = queue.Queue()
@@ -29,18 +29,20 @@ _lock = threading.Lock()
 # --------------------------------------------------------------------------
 # Public API
 # --------------------------------------------------------------------------
-def enqueue(kind, user_id, question_id):
-    """Create a job and queue it. Deduped: if a pending/running job of the same
-    kind already exists for this question, return that one instead."""
+def enqueue(kind, user_id, question_id, request_id=None):
+    """Create a job and queue it. Deduped on the job's subject — the request for
+    write_guide, else the question: if a pending/running job of the same kind
+    already exists for it, return that one instead."""
     with get_conn() as conn:
+        subject = ("request_id", request_id) if request_id else ("question_id", question_id)
         existing = conn.execute(
-            "SELECT id FROM jobs WHERE question_id = ? AND kind = ? AND status IN ('pending','running')",
-            (question_id, kind)).fetchone()
+            f"SELECT id FROM jobs WHERE {subject[0]} = ? AND kind = ? AND status IN ('pending','running')",
+            (subject[1], kind)).fetchone()
         if existing:
             return existing["id"]
         jid = conn.execute(
-            "INSERT INTO jobs (kind, user_id, question_id) VALUES (?, ?, ?)",
-            (kind, user_id, question_id)).lastrowid
+            "INSERT INTO jobs (kind, user_id, question_id, request_id) VALUES (?, ?, ?, ?)",
+            (kind, user_id, question_id, request_id)).lastrowid
     _Q.put(jid)
     return jid
 
@@ -94,6 +96,8 @@ def run_job(jid):
             _run_generate_from_chat(job)
         elif job["kind"] == "flag_fix":
             _run_flag_fix(job)
+        elif job["kind"] == "write_guide":
+            _run_write_guide(job)
         else:
             _finish(jid, "error", f"unknown kind {job['kind']}")
     except Exception as e:  # noqa: BLE001
@@ -240,6 +244,42 @@ def _run_flag_fix(job):
              str(fix.get("answer", q["answer"])), str(fix.get("explanation", "")),
              source_id, str(fix.get("rationale", ""))))
     _finish(job["id"], "done", "proposed a correction" + _suffix(serr))
+
+
+def _run_write_guide(job):
+    """Draft a study guide for a learner's request. The draft lands in
+    `guide_drafts` (status pending) for admin review — never straight to the
+    kids' study page: the local model's drafts are good but not error-free."""
+    with get_conn() as conn:
+        req = conn.execute("SELECT * FROM study_requests WHERE id = ?",
+                           (job["request_id"],)).fetchone()
+        req = dict(req) if req else None
+    if not req:
+        _finish(job["id"], "error", "the request this guide was for no longer exists")
+        return
+    kb = ""
+    if req["question_id"]:  # request came off a quiz question -> ground in its chapter KB
+        ctx = _load_context(req["question_id"])
+        if ctx:
+            kb = ctx[3]
+    results, serr = search.web_search(req["topic"])
+    result = ai.write_guide(req["topic"], req["note"], kb, search.format_results(results))
+    if not result["ok"]:
+        _finish(job["id"], "error", (result["error"] or "drafting failed") + _suffix(serr))
+        return
+    draft = study.parse_draft(result["text"], fallback_title=req["topic"])
+    if not draft:
+        _finish(job["id"], "error", "model output had no usable guide body" + _suffix(serr))
+        return
+    with get_conn() as conn:
+        taken = {r["slug"] for r in conn.execute("SELECT slug FROM guide_drafts")}
+        conn.execute(
+            """INSERT INTO guide_drafts (request_id, job_id, slug, title, summary, body)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (req["id"], job["id"], study.slugify(draft["title"], taken),
+             draft["title"], draft["summary"], draft["body"]))
+    _finish(job["id"], "done",
+            f"drafted \"{draft['title']}\" — awaiting review" + _suffix(serr))
 
 
 def _suffix(serr):

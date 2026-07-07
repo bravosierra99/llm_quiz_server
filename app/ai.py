@@ -19,6 +19,12 @@ AI_BASE_URL = os.environ.get("AI_BASE_URL", "http://localhost:1234/v1").rstrip("
 AI_MODEL = os.environ.get("AI_MODEL", "local-model")
 AI_API_KEY = os.environ.get("AI_API_KEY", "")
 AI_TIMEOUT = float(os.environ.get("AI_TIMEOUT", "180"))  # local models run ~1-2 min/batch
+# Study-guide drafting is a background job with no one waiting on the request,
+# so it can afford a bigger (slower) model than the interactive paths. Measured
+# on the household LM Studio box: the 27B reasoning model writes a guide in
+# ~7.5 min alone, longer when the tutor's model shares memory — hence 30 min.
+AI_GUIDE_MODEL = os.environ.get("AI_GUIDE_MODEL", AI_MODEL)
+AI_GUIDE_TIMEOUT = float(os.environ.get("AI_GUIDE_TIMEOUT", "1800"))
 
 VALID_TYPES = {"mcq", "truefalse", "short"}
 
@@ -133,18 +139,18 @@ def _clean_question(raw):
     }, None
 
 
-def _chat(messages):
+def _chat(messages, model=None, timeout=None):
     headers = {"Content-Type": "application/json"}
     if AI_API_KEY:
         headers["Authorization"] = f"Bearer {AI_API_KEY}"
     payload = {
-        "model": AI_MODEL,
+        "model": model or AI_MODEL,
         "messages": messages,
         "temperature": 0.4,
         # No max_tokens: a hard cap truncates replies mid-thought (a recurring
         # foot-gun). Length is controlled by the prompts, not by truncation.
     }
-    with httpx.Client(timeout=AI_TIMEOUT) as client:
+    with httpx.Client(timeout=timeout or AI_TIMEOUT) as client:
         resp = client.post(f"{AI_BASE_URL}/chat/completions", json=payload, headers=headers)
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
@@ -312,6 +318,52 @@ def tutor(context_block, history, user_message):
     messages.extend({"role": m["role"], "content": m["content"]} for m in history)
     messages.append({"role": "user", "content": user_message})
     return (_chat(messages) or "").strip()
+
+
+GUIDE_SYSTEM = """You write study guides for a small family quiz app. Output ONLY a \
+markdown document — no preamble, no commentary before or after it, no code fences \
+around the whole document.
+
+Format requirements:
+- Start with a frontmatter block: a line `---`, then `title: ...` and \
+`summary: ...` (one sentence) lines, then a closing `---`.
+- Then a single `# H1` title.
+- Use markdown tables where they help (the app renders them nicely).
+- Use **bold** for every key term the first time it appears.
+- Break the topic into `##` sections. End with a short self-check section whose \
+answers are separated from the questions.
+- Whole-topic: teach the background, not a single answer.
+- Factual accuracy matters more than breadth. If you are not sure of a fact, \
+leave it out.
+
+Match the reading level to the audience. If the topic is elementary-school \
+material, write for a young child: very short sentences, everyday words, concrete \
+example sentences (show each concept working inside a sentence, not just word \
+lists), a friendly voice, and a memorable "how to spot it" trick for each concept. \
+Otherwise write for an adult: clear and direct, no filler."""
+
+
+def write_guide(topic, note, kb_text, search_text):
+    """Draft a whole-topic study guide as raw markdown. Runs on AI_GUIDE_MODEL
+    (a bigger model than the interactive paths — nobody is waiting on this).
+    Returns dict {ok, text, error}; the caller parses/sanitises the text."""
+    parts = [f"Write a study guide on this topic: {topic}"]
+    if note:
+        parts.append(f"The learner who asked added: {note}")
+    if kb_text:
+        parts.append("Use this chapter knowledge base for exact scope and "
+                     f"terminology — the quiz questions come from it:\n\n{kb_text}")
+    if search_text:
+        parts.append(f"Reference these web search results for accuracy:\n\n{search_text}")
+    messages = [
+        {"role": "system", "content": GUIDE_SYSTEM},
+        {"role": "user", "content": "\n\n".join(parts)},
+    ]
+    try:
+        text = _chat(messages, model=AI_GUIDE_MODEL, timeout=AI_GUIDE_TIMEOUT)
+    except (httpx.HTTPError, KeyError, IndexError) as e:
+        return {"ok": False, "text": "", "error": f"AI request failed: {e}"}
+    return {"ok": True, "text": text or "", "error": None}
 
 
 def verify_and_fix(question, context, kb_text, search_text):

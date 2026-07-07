@@ -40,6 +40,12 @@ one or several chapters at a time. Runs as a single Docker container.
   that suggests *why* a question is missed (ambiguous wording, wrong answer key,
   needs a foundational question) — curation advice only; nothing changes
   automatically.
+- **Study guides**: whole-topic readable material for "I got quizzed on something
+  I was never taught." Guides are markdown — some ship with the code
+  (`app/study/*.md`), and a learner can **request a topic**: a background job
+  drafts a guide with the AI (`AI_GUIDE_MODEL` — a bigger model than the
+  interactive paths, since nobody waits on it), and it lands in the **admin
+  review queue**; nothing is published to learners without approval.
 - **Family profiles + roles**: lightweight per-person profiles with quiz history.
   **Admins** can add/edit/generate/delete content; **non-admin profiles are
   quiz-only** (every mutation + generation route is gated by `require_admin`).
@@ -115,6 +121,8 @@ them in an untracked `.env`.
 | `AI_MODEL` | `local-model` | Model id as served by the endpoint. Set this to match what's loaded. |
 | `AI_API_KEY` | *(empty)* | API token for the endpoint, if it requires one. |
 | `AI_TIMEOUT` | `180` | Seconds to wait on a generation call. Local models can run 1–2 min/batch. |
+| `AI_GUIDE_MODEL` | *(`AI_MODEL`)* | Model for background study-guide drafting. Nobody waits on it, so a bigger/slower model than the interactive paths pays off. |
+| `AI_GUIDE_TIMEOUT` | `1800` | Seconds to wait on a guide draft (reasoning models think for minutes). |
 | `QUIZ_SECRET_KEY` | `dev-insecure-change-me` | Signs the profile cookie. Set to `openssl rand -hex 32`. |
 | `ADMIN_EMAILS` | *(empty)* | Comma-separated emails that become admins. |
 | `QUIZ_DB_PATH` | `/data/quiz.db` | SQLite path (inside the container). |

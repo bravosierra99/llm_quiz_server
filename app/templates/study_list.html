@@ -9,7 +9,7 @@
   Mark one learned once it's stuck — it moves to <em>Learned</em>, it's never deleted.</p>
 
 {% if request.query_params.get('requested') %}
-<p class="flash">Got it — that topic is on the list for Claude to write up. It'll appear here once it's ready.</p>
+<p class="flash">Got it — a guide is being drafted for you. It'll appear here once an adult has checked it.</p>
 {% endif %}
 
 {% if to_read %}
@@ -29,7 +29,7 @@
 <div class="card">
   <p class="muted">No study guides yet. When a quiz hits something you've never learned,
     use <strong>“📖 Never learned this — request a full guide”</strong> on the feedback
-    screen (or the box below) and Claude will write you one.</p>
+    screen (or the box below) and one gets written for you.</p>
 </div>
 {% else %}
 <p class="muted">🎉 You've marked every guide learned. Nice.</p>
@@ -57,8 +57,8 @@
 
 <section>
   <h2>Request a topic</h2>
-  <p class="muted small">Name something you want taught from scratch. Claude writes it up
-    and it shows up here to read.</p>
+  <p class="muted small">Name something you want taught from scratch. A guide gets
+    drafted, checked by an adult, and shows up here to read.</p>
   <form method="post" action="/study/request" class="stack card">
     <label>Topic
       <input type="text" name="topic" placeholder="e.g. How PWM works on an Arduino" required>
@@ -71,20 +71,32 @@
 
   {% if requests %}
   <h3>Pending requests</h3>
-  <p class="muted small">These wait for Claude to write the guide (it isn't automatic).
-    Once a guide for one shows up above, <strong>Dismiss</strong> the request to clear it.</p>
+  <p class="muted small">A draft gets written automatically (it can take a while —
+    the model thinks hard), then an adult checks it before it appears above.
+    Claude can also write one by hand. <strong>Dismiss</strong> clears a request
+    you no longer want.</p>
   <div class="stack">
     {% for r in requests %}
     <div class="card row-between">
       <div>
         <strong>{{ r.topic }}</strong>
         {% if r.note %}<p class="muted small">{{ r.note }}</p>{% endif %}
-        <p class="muted small">requested {{ r.created_at[:10] }}{% if r.who %} · by {{ r.who }}{% endif %}</p>
+        <p class="muted small">requested {{ r.created_at[:10] }}{% if r.who %} · by {{ r.who }}{% endif %}
+          {% if r.draft_pending %} · ✍️ draft awaiting review{% if user.is_admin %} — <a href="/review">review it</a>{% endif %}
+          {% elif r.drafting %} · ⏳ drafting…{% endif %}</p>
       </div>
-      <form method="post" action="/study/requests/{{ r.id }}/dismiss">
-        <input type="hidden" name="back" value="/study">
-        <button type="submit" class="btn small">Dismiss</button>
-      </form>
+      <div class="row-actions">
+        {% if user.is_admin and not r.drafting and not r.draft_pending %}
+        <form method="post" action="/study/requests/{{ r.id }}/draft">
+          <input type="hidden" name="back" value="/study">
+          <button type="submit" class="btn small">✍️ Draft with AI</button>
+        </form>
+        {% endif %}
+        <form method="post" action="/study/requests/{{ r.id }}/dismiss">
+          <input type="hidden" name="back" value="/study">
+          <button type="submit" class="btn small">Dismiss</button>
+        </form>
+      </div>
     </div>
     {% endfor %}
   </div>

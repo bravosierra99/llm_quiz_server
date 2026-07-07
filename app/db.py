@@ -159,6 +159,7 @@ CREATE TABLE IF NOT EXISTS jobs (
                 CHECK (status IN ('pending','running','done','error')),
     user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
     question_id INTEGER REFERENCES questions(id) ON DELETE CASCADE,
+    request_id  INTEGER,  -- study_requests.id for write_guide jobs (no FK: see init_db)
     message     TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     finished_at TEXT
@@ -210,10 +211,11 @@ CREATE TABLE IF NOT EXISTS study_progress (
     PRIMARY KEY (user_id, slug)
 );
 
--- A dumb capture inbox: a learner names a topic they want taught (often straight
--- off a quiz question they never learned). Claude reads these via db-pull and
--- fulfils them by committing a new app/study/*.md file; there is deliberately NO
--- automatic request->guide matching. fulfilled_at lets a row be dismissed by hand.
+-- A capture inbox: a learner names a topic they want taught (often straight
+-- off a quiz question they never learned). Each request auto-queues a
+-- `write_guide` job that drafts a guide with the local model (see jobs.py);
+-- Claude can also fulfil one by hand by committing a new app/study/*.md file.
+-- fulfilled_at marks a row handled (set on guide approval, or by hand).
 CREATE TABLE IF NOT EXISTS study_requests (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     topic        TEXT NOT NULL,
@@ -222,6 +224,26 @@ CREATE TABLE IF NOT EXISTS study_requests (
     question_id  INTEGER REFERENCES questions(id) ON DELETE SET NULL,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     fulfilled_at TEXT
+);
+
+-- A model-drafted study guide awaiting admin review (the guide analogue of
+-- `proposals`). Unlike file guides, these live in the DB because the container
+-- filesystem is rebuilt on every deploy. Published drafts merge into the /study
+-- catalog alongside the Claude-authored files (files win a slug collision).
+-- title/summary/body are stored parsed & sanitised (jobs.py strips reasoning
+-- blocks and frontmatter), so rendering never depends on raw model output.
+CREATE TABLE IF NOT EXISTS guide_drafts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id  INTEGER REFERENCES study_requests(id) ON DELETE SET NULL,
+    job_id      INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+    slug        TEXT NOT NULL UNIQUE,
+    title       TEXT NOT NULL,
+    summary     TEXT NOT NULL DEFAULT '',
+    body        TEXT NOT NULL,           -- markdown
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','published','rejected')),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_at TEXT
 );
 
 """
@@ -244,6 +266,7 @@ CREATE INDEX IF NOT EXISTS idx_review_user ON review_state(user_id);
 CREATE INDEX IF NOT EXISTS idx_review_question ON review_state(question_id);
 CREATE INDEX IF NOT EXISTS idx_study_progress_user ON study_progress(user_id);
 CREATE INDEX IF NOT EXISTS idx_study_requests_open ON study_requests(fulfilled_at);
+CREATE INDEX IF NOT EXISTS idx_guide_drafts_status ON guide_drafts(status);
 """
 
 
@@ -262,6 +285,11 @@ def init_db():
         _add_column_if_missing(conn, "subjects", "teaching_notes",
                                "TEXT NOT NULL DEFAULT ''")
         _relax_jobs_kind_check(conn)
+        # write_guide jobs are about a request, not a question. No FK action —
+        # a dangling id after a request delete is harmless job history. Must run
+        # AFTER _relax_jobs_kind_check: that migration rebuilds the jobs table
+        # from a fixed column list and would drop a column added before it.
+        _add_column_if_missing(conn, "jobs", "request_id", "INTEGER")
         _migrate_to_node_tree(conn)
         conn.executescript(INDEXES)
 

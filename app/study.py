@@ -1,8 +1,15 @@
 """Study guides: whole-topic learning material a learner can read, then mark
-learned. The CONTENT lives as Claude-authored markdown files baked into the image
-(``app/study/*.md``) — the filesystem is the catalog, so a guide ships with the
-code and the code-only deploy carries it with no DB write. The DB only holds a
-per-user "learned" flag (keyed by the file's slug) and a request inbox; see db.py.
+learned. Guide content comes from TWO places, merged into one catalog:
+
+- **Files** (``app/study/*.md``): Claude-authored markdown baked into the image —
+  a guide ships with the code, no DB write. The gold standard.
+- **DB drafts** (``guide_drafts``, status ``published``): guides drafted by the
+  local model from a learner's request (jobs.py ``write_guide``) and approved by
+  an admin on the Review page. These live in the DB because the container
+  filesystem is rebuilt on every deploy. A file wins any slug collision.
+
+The DB additionally holds a per-user "learned" flag (keyed by slug, same for both
+kinds) and the request inbox; see db.py.
 
 A guide file is plain markdown. An optional leading ``---`` frontmatter block may
 set ``title``/``summary``/``order``; everything is graceful — a file that just
@@ -10,6 +17,7 @@ starts with ``# Heading`` (like the existing research KBs) parses fine, taking i
 title from that first H1 and falling back to the prettified filename.
 """
 import os
+import re
 from functools import lru_cache
 
 import markdown as _md
@@ -101,19 +109,78 @@ def _catalog():
     return guides
 
 
-def list_guides():
-    """Lightweight list for the index (no rendered HTML)."""
-    return [dict(g) for g in _catalog()]
+def list_guides(conn=None):
+    """Lightweight catalog for the index (no rendered HTML): file guides plus,
+    when a conn is given, published model drafts. A file wins a slug collision."""
+    guides = [dict(g) for g in _catalog()]
+    if conn is not None:
+        file_slugs = {g["slug"] for g in guides}
+        for r in conn.execute(
+                "SELECT slug, title, summary FROM guide_drafts "
+                "WHERE status = 'published'"):
+            if r["slug"] not in file_slugs:
+                guides.append({"slug": r["slug"], "title": r["title"],
+                               "summary": r["summary"], "order": 10_000})
+        guides.sort(key=lambda g: (g["order"], g["title"].lower()))
+    return guides
 
 
-def get_guide(slug):
-    """Full guide with rendered HTML, or None if the slug isn't a real file.
-    Guards against path traversal — slug must be a bare stem we actually have."""
-    if slug not in {g["slug"] for g in _catalog()}:
+def get_guide(slug, conn=None):
+    """Full guide with rendered HTML, or None. Files first (guards path traversal
+    — slug must be a bare stem we actually have), then published DB drafts."""
+    if slug in {g["slug"] for g in _catalog()}:
+        g = _read(slug + ".md")
+        g["html"] = render_html(g["body"])
+        return g
+    if conn is not None:
+        r = conn.execute(
+            "SELECT slug, title, summary, body FROM guide_drafts "
+            "WHERE slug = ? AND status = 'published'", (slug,)).fetchone()
+        if r:
+            g = dict(r)
+            g["html"] = render_html(g["body"])
+            return g
+    return None
+
+
+# --------------------------------------------------------------------------
+# Model-drafted guides (the write_guide job) — sanitising raw model output
+# --------------------------------------------------------------------------
+# Reasoning models leak their scratchpad in tags that vary by model/template
+# (<think>, <thinking>, …); strip any such leading block. Also unwrap a whole-
+# document ```markdown fence, another common way models disobey "markdown only".
+_REASONING_RE = re.compile(r"<think[a-z]*>.*?</think[a-z]*>\s*",
+                           re.DOTALL | re.IGNORECASE)
+
+
+def parse_draft(text, fallback_title):
+    """Raw model output -> {title, summary, body} with the reasoning block and
+    frontmatter stripped. The body is stored WITHOUT frontmatter — title/summary
+    live in dedicated columns, so rendering never re-parses model formatting.
+    Returns None if nothing usable is left."""
+    text = _REASONING_RE.sub("", text or "").strip()
+    fence = re.match(r"^```(?:markdown|md)?\s*\n(.*)\n```\s*$", text, re.DOTALL)
+    if fence:
+        text = fence.group(1).strip()
+    meta, body = _parse_frontmatter(text)
+    body = body.strip()
+    if not body:
         return None
-    g = _read(slug + ".md")
-    g["html"] = render_html(g["body"])
-    return g
+    title = meta.get("title") or _first_h1(body) or fallback_title
+    return {"title": title.strip(), "summary": meta.get("summary", "").strip(),
+            "body": body}
+
+
+def slugify(title, taken=()):
+    """Title -> a catalog-safe slug, uniquified against file guides, the given
+    set (e.g. existing draft slugs), and emptiness."""
+    base = re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", title.lower())).strip("-")
+    base = base[:60].rstrip("-") or "guide"
+    existing = {g["slug"] for g in _catalog()} | set(taken)
+    slug, n = base, 2
+    while slug in existing:
+        slug, n = f"{base}-{n}", n + 1
+    return slug
 
 
 def render_html(text):

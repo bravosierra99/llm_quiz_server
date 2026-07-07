@@ -59,4 +59,37 @@
 <p class="muted">No proposals waiting. Flag a question or use "generate more like this" while quizzing.</p>
 {% endif %}
 
+<h2>Guide drafts {% if drafts %}({{ drafts|length }}){% endif %}</h2>
+{% if drafts %}
+<p class="muted">Study guides drafted by the local model from a learner's request.
+  Approving publishes the guide to everyone's <a href="/study">study library</a>
+  exactly as previewed; nothing is published without you.</p>
+  {% for d in drafts %}
+  <div class="card">
+    <div class="row-between">
+      <strong>{{ d.title }}</strong>
+      <span class="muted small">{% if d.req_topic %}requested: {{ d.req_topic }}{% endif %}
+        {% if d.who %} · by {{ d.who }}{% endif %}</span>
+    </div>
+    {% if d.summary %}<p class="muted small">{{ d.summary }}</p>{% endif %}
+    <details>
+      <summary>Preview the full guide</summary>
+      {# Rendered with the study reader's pipeline — approved = published as-is. #}
+      <div class="prose">{{ d.html|safe }}</div>
+    </details>
+    <div class="actions row-actions">
+      <form method="post" action="/guide-drafts/{{ d.id }}/approve">
+        <button type="submit" class="btn primary small">✓ Publish to study library</button>
+      </form>
+      <form method="post" action="/guide-drafts/{{ d.id }}/reject">
+        <button type="submit" class="btn small">✗ Reject draft</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+<p class="muted">No guide drafts waiting. A learner's request on the
+  <a href="/study">study page</a> queues one automatically.</p>
+{% endif %}
+
 {% endblock %}

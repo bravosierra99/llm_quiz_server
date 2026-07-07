@@ -1296,21 +1296,27 @@ def study_index(request: Request):
     user, redirect = require_user(request)
     if redirect:
         return redirect
-    guides = study.list_guides()
     with get_conn() as conn:
+        guides = study.list_guides(conn)
         learned = _learned_slugs(conn, user["id"])
+        # Each open request carries its drafting state so the list can say
+        # "drafting…" / "draft awaiting review" instead of looking stuck.
+        req_sql = """
+            SELECT sr.*, u.name AS who,
+                   (SELECT COUNT(*) FROM jobs j WHERE j.request_id = sr.id
+                     AND j.kind = 'write_guide'
+                     AND j.status IN ('pending','running'))  AS drafting,
+                   (SELECT COUNT(*) FROM guide_drafts gd WHERE gd.request_id = sr.id
+                     AND gd.status = 'pending')              AS draft_pending
+            FROM study_requests sr LEFT JOIN users u ON u.id = sr.user_id
+            WHERE sr.fulfilled_at IS NULL {who} ORDER BY sr.created_at DESC"""
         # Admin sees the whole request inbox (it's their to-do); a learner sees
         # only their own open requests so the page stays personal.
         if user.get("is_admin"):
-            reqs = [dict(r) for r in conn.execute(
-                """SELECT sr.*, u.name AS who FROM study_requests sr
-                   LEFT JOIN users u ON u.id = sr.user_id
-                   WHERE sr.fulfilled_at IS NULL ORDER BY sr.created_at DESC""")]
+            reqs = [dict(r) for r in conn.execute(req_sql.format(who=""))]
         else:
             reqs = [dict(r) for r in conn.execute(
-                """SELECT * FROM study_requests
-                   WHERE user_id = ? AND fulfilled_at IS NULL
-                   ORDER BY created_at DESC""", (user["id"],))]
+                req_sql.format(who="AND sr.user_id = ?"), (user["id"],))]
     to_read = [g for g in guides if g["slug"] not in learned]
     done = [g for g in guides if g["slug"] in learned]
     return render(request, "study_list.html", to_read=to_read, done=done,
@@ -1322,11 +1328,11 @@ def study_guide(request: Request, slug: str):
     user, redirect = require_user(request)
     if redirect:
         return redirect
-    guide = study.get_guide(slug)
+    with get_conn() as conn:
+        guide = study.get_guide(slug, conn)
+        learned = slug in _learned_slugs(conn, user["id"])
     if not guide:
         return RedirectResponse("/study", status_code=303)
-    with get_conn() as conn:
-        learned = slug in _learned_slugs(conn, user["id"])
     return render(request, "study_guide.html", guide=guide, learned=learned)
 
 
@@ -1338,10 +1344,10 @@ def study_set_learned(request: Request, slug: str, learned: str = Form("1"),
     user, redirect = require_user(request)
     if redirect:
         return redirect
-    if not study.get_guide(slug):
-        return RedirectResponse("/study", status_code=303)
     stamp = "datetime('now')" if learned == "1" else "NULL"
     with get_conn() as conn:
+        if not study.get_guide(slug, conn):
+            return RedirectResponse("/study", status_code=303)
         conn.execute(
             f"""INSERT INTO study_progress (user_id, slug, learned_at)
                 VALUES (?, ?, {stamp})
@@ -1353,9 +1359,10 @@ def study_set_learned(request: Request, slug: str, learned: str = Form("1"),
 @app.post("/study/request")
 def study_request(request: Request, topic: str = Form(""), note: str = Form(""),
                   question_id: str = Form(""), back: str = Form("/study")):
-    """A learner names a topic they want Claude to write up (often straight off a
-    quiz question they never learned). Dumb capture — no auto-matching; Claude
-    reads these via db-pull and fulfils them by committing a guide file."""
+    """A learner names a topic they want taught (often straight off a quiz
+    question they never learned). Captures the request AND queues a write_guide
+    job: the local model drafts a guide into the admin review queue. Claude can
+    still fulfil one by hand by committing a guide file."""
     user, redirect = require_user(request)
     if redirect:
         return redirect
@@ -1376,14 +1383,34 @@ def study_request(request: Request, topic: str = Form(""), note: str = Form(""),
                 names = [n["name"] for n in (root, ch) if n]
                 # "Wine — Tasting" style; drop the root if it duplicates the chapter.
                 topic = " — ".join(dict.fromkeys(names)) if names else ""
+        rid = None
         if topic:
-            conn.execute(
+            rid = conn.execute(
                 """INSERT INTO study_requests (topic, note, user_id, question_id)
                    VALUES (?, ?, ?, ?)""",
-                (topic, note.strip(), user["id"], qid))
+                (topic, note.strip(), user["id"], qid)).lastrowid
+    if rid:
+        jobs.enqueue("write_guide", user["id"], qid, request_id=rid)
     dest = _safe_back(back)
     sep = "&" if "?" in dest else "?"
     return RedirectResponse(f"{dest}{sep}requested=1", status_code=303)
+
+
+@app.post("/study/requests/{req_id}/draft")
+def study_request_draft(request: Request, req_id: int, back: str = Form("/study")):
+    """Admin-only: (re)queue the write_guide job for an open request — covers
+    requests that predate auto-drafting and re-runs after a rejected draft.
+    Deduped in enqueue, so mashing the button is safe."""
+    user, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        req = conn.execute(
+            "SELECT * FROM study_requests WHERE id = ? AND fulfilled_at IS NULL",
+            (req_id,)).fetchone()
+    if req:
+        jobs.enqueue("write_guide", user["id"], req["question_id"], request_id=req_id)
+    return RedirectResponse(_safe_back(back), status_code=303)
 
 
 @app.post("/study/requests/{req_id}/dismiss")
@@ -1864,7 +1891,18 @@ def review(request: Request):
         for p in proposals:
             p["choices"] = jloads(p["choices"])
             p["cur_choices"] = jloads(p["cur_choices"]) if p["cur_choices"] else []
-    return render(request, "review_queue.html", proposals=proposals)
+        drafts = [dict(r) for r in conn.execute("""
+            SELECT gd.*, sr.topic AS req_topic, u.name AS who
+            FROM guide_drafts gd
+            LEFT JOIN study_requests sr ON gd.request_id = sr.id
+            LEFT JOIN users u ON sr.user_id = u.id
+            WHERE gd.status = 'pending' ORDER BY gd.created_at, gd.id
+        """)]
+        for d in drafts:
+            # Preview with the SAME pipeline the study reader uses — what the
+            # admin approves is exactly what the learner will see.
+            d["html"] = study.render_html(d["body"])
+    return render(request, "review_queue.html", proposals=proposals, drafts=drafts)
 
 
 @app.post("/proposals/{pid}/approve")
@@ -1908,6 +1946,39 @@ def reject_proposal(request: Request, pid: int):
         return redirect
     with get_conn() as conn:
         conn.execute("UPDATE proposals SET status = 'rejected' WHERE id = ? AND status = 'pending'", (pid,))
+    return RedirectResponse("/review", status_code=303)
+
+
+@app.post("/guide-drafts/{gid}/approve")
+def approve_guide_draft(request: Request, gid: int):
+    """Publish a model-drafted guide to the study library, and mark the request
+    that spawned it fulfilled (its learner's ask is now answered)."""
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        d = conn.execute("SELECT * FROM guide_drafts WHERE id = ? AND status = 'pending'",
+                         (gid,)).fetchone()
+        if d:
+            conn.execute("UPDATE guide_drafts SET status = 'published', "
+                         "reviewed_at = datetime('now') WHERE id = ?", (gid,))
+            if d["request_id"]:
+                conn.execute("UPDATE study_requests SET fulfilled_at = datetime('now') "
+                             "WHERE id = ?", (d["request_id"],))
+    return RedirectResponse("/review", status_code=303)
+
+
+@app.post("/guide-drafts/{gid}/reject")
+def reject_guide_draft(request: Request, gid: int):
+    """Discard a draft. The request stays open — redraft with the button on
+    /study, or leave it for Claude to write by hand."""
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        conn.execute("UPDATE guide_drafts SET status = 'rejected', "
+                     "reviewed_at = datetime('now') WHERE id = ? AND status = 'pending'",
+                     (gid,))
     return RedirectResponse("/review", status_code=303)
 
 
