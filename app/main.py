@@ -200,11 +200,12 @@ def index(request: Request):
             """SELECT 1 FROM collection_nodes cn JOIN collections c ON c.id = cn.collection_id
                WHERE c.user_id = ? LIMIT 1""", (user["id"],)).fetchone()
         learned = _learned_slugs(conn, user["id"])
+        skip = learned | _hidden_slugs(conn, user["id"])
+        study_to_read = sum(1 for g in study.list_guides(conn) if g["slug"] not in skip)
     summary = dict(totals)
     summary["pct"] = (round(summary["correct"] / summary["answered"] * 100)
                       if summary["answered"] else None)
     streak = _study_streak({date.fromisoformat(d) for d in days})
-    study_to_read = sum(1 for g in study.list_guides() if g["slug"] not in learned)
     return render(request, "home.html", recent=recent, summary=summary,
                   streak=streak, has_subjects=bool(has_content),
                   study_to_read=study_to_read)
@@ -1289,6 +1290,23 @@ def _learned_slugs(conn, user_id):
         (user_id,))}
 
 
+def _hidden_slugs(conn, user_id):
+    return {r["slug"] for r in conn.execute(
+        "SELECT slug FROM study_progress WHERE user_id = ? AND hidden_at IS NOT NULL",
+        (user_id,))}
+
+
+def _set_study_flag(conn, user_id, slug, column, on):
+    """Upsert one per-user guide flag (learned_at / hidden_at) without touching
+    the other column. `column` is code-controlled, never user input."""
+    stamp = "datetime('now')" if on else "NULL"
+    conn.execute(
+        f"""INSERT INTO study_progress (user_id, slug, {column})
+            VALUES (?, ?, {stamp})
+            ON CONFLICT(user_id, slug) DO UPDATE SET {column} = {stamp}""",
+        (user_id, slug))
+
+
 @app.get("/study", response_class=HTMLResponse)
 def study_index(request: Request):
     """The study library: every guide split into 'to read' vs 'learned', plus the
@@ -1299,6 +1317,7 @@ def study_index(request: Request):
     with get_conn() as conn:
         guides = study.list_guides(conn)
         learned = _learned_slugs(conn, user["id"])
+        hidden = _hidden_slugs(conn, user["id"])
         # Each open request carries its drafting state so the list can say
         # "drafting…" / "draft awaiting review" instead of looking stuck.
         req_sql = """
@@ -1317,10 +1336,11 @@ def study_index(request: Request):
         else:
             reqs = [dict(r) for r in conn.execute(
                 req_sql.format(who="AND sr.user_id = ?"), (user["id"],))]
-    to_read = [g for g in guides if g["slug"] not in learned]
-    done = [g for g in guides if g["slug"] in learned]
+    to_read = [g for g in guides if g["slug"] not in learned | hidden]
+    done = [g for g in guides if g["slug"] in learned and g["slug"] not in hidden]
+    dismissed = [g for g in guides if g["slug"] in hidden]
     return render(request, "study_list.html", to_read=to_read, done=done,
-                  requests=reqs)
+                  dismissed=dismissed, requests=reqs)
 
 
 @app.get("/study/{slug}", response_class=HTMLResponse)
@@ -1331,9 +1351,17 @@ def study_guide(request: Request, slug: str):
     with get_conn() as conn:
         guide = study.get_guide(slug, conn)
         learned = slug in _learned_slugs(conn, user["id"])
+        # Admins curate who sees this guide (checked = on that person's page).
+        audience = [dict(r) for r in conn.execute(
+            """SELECT u.id, u.name,
+                      (sp.hidden_at IS NOT NULL) AS is_hidden
+               FROM users u LEFT JOIN study_progress sp
+                    ON sp.user_id = u.id AND sp.slug = ?
+               ORDER BY u.name""", (slug,))] if user.get("is_admin") else []
     if not guide:
         return RedirectResponse("/study", status_code=303)
-    return render(request, "study_guide.html", guide=guide, learned=learned)
+    return render(request, "study_guide.html", guide=guide, learned=learned,
+                  audience=audience)
 
 
 @app.post("/study/{slug}/learned")
@@ -1344,16 +1372,44 @@ def study_set_learned(request: Request, slug: str, learned: str = Form("1"),
     user, redirect = require_user(request)
     if redirect:
         return redirect
-    stamp = "datetime('now')" if learned == "1" else "NULL"
     with get_conn() as conn:
         if not study.get_guide(slug, conn):
             return RedirectResponse("/study", status_code=303)
-        conn.execute(
-            f"""INSERT INTO study_progress (user_id, slug, learned_at)
-                VALUES (?, ?, {stamp})
-                ON CONFLICT(user_id, slug) DO UPDATE SET learned_at = {stamp}""",
-            (user["id"], slug))
+        _set_study_flag(conn, user["id"], slug, "learned_at", learned == "1")
     return RedirectResponse(_safe_back(back), status_code=303)
+
+
+@app.post("/study/{slug}/hidden")
+def study_set_hidden(request: Request, slug: str, hidden: str = Form("1"),
+                     back: str = Form("/study")):
+    """'Not for me': hide a guide from your own study page (reversible — it
+    moves to a collapsed Dismissed section, same spirit as mark-learned)."""
+    user, redirect = require_user(request)
+    if redirect:
+        return redirect
+    with get_conn() as conn:
+        if not study.get_guide(slug, conn):
+            return RedirectResponse("/study", status_code=303)
+        _set_study_flag(conn, user["id"], slug, "hidden_at", hidden == "1")
+    return RedirectResponse(_safe_back(back), status_code=303)
+
+
+@app.post("/study/{slug}/audience")
+def study_set_audience(request: Request, slug: str,
+                       visible_ids: list[str] = Form([])):
+    """Admin-only: set exactly who has this guide on their study page. Checked
+    people get it; everyone else gets a hidden flag. Touches only hidden_at —
+    learned state survives audience changes."""
+    _, redirect = require_admin(request)
+    if redirect:
+        return redirect
+    visible = {int(v) for v in visible_ids if str(v).isdigit()}
+    with get_conn() as conn:
+        if not study.get_guide(slug, conn):
+            return RedirectResponse("/study", status_code=303)
+        for u in conn.execute("SELECT id FROM users"):
+            _set_study_flag(conn, u["id"], slug, "hidden_at", u["id"] not in visible)
+    return RedirectResponse(f"/study/{slug}", status_code=303)
 
 
 @app.post("/study/request")

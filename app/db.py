@@ -206,8 +206,12 @@ CREATE TABLE IF NOT EXISTS tutor_messages (
 -- inbox of topics a learner asked Claude to write up.
 CREATE TABLE IF NOT EXISTS study_progress (
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    slug       TEXT NOT NULL,            -- study guide filename stem (stable key)
+    slug       TEXT NOT NULL,            -- study guide slug (stable key)
     learned_at TEXT,
+    -- "Not for me": hides the guide from THIS user's study page (their own
+    -- dismiss button, or an admin curating the guide's audience). Reversible,
+    -- list-filtering only — the guide stays readable by direct URL.
+    hidden_at  TEXT,
     PRIMARY KEY (user_id, slug)
 );
 
@@ -290,6 +294,7 @@ def init_db():
         # AFTER _relax_jobs_kind_check: that migration rebuilds the jobs table
         # from a fixed column list and would drop a column added before it.
         _add_column_if_missing(conn, "jobs", "request_id", "INTEGER")
+        _add_column_if_missing(conn, "study_progress", "hidden_at", "TEXT")
         _migrate_to_node_tree(conn)
         conn.executescript(INDEXES)
 

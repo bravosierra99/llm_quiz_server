@@ -135,6 +135,47 @@ def test_review_actions_are_admin_gated(client, admin, kid, request_id, monkeypa
                             (gid,)).fetchone()["status"] == "pending"
 
 
+# --- per-user visibility (dismiss + admin audience) --------------------------
+def test_dismiss_hides_only_for_that_user_and_is_reversible(client, admin, kid):
+    # File guides work too; use the shipped welcome guide.
+    title = "How study guides work"
+    assert title in client.get("/study", headers=kid).text
+    client.post("/study/00-welcome/hidden", headers=kid, data={"hidden": "1"})
+    page = client.get("/study", headers=kid).text
+    assert "Dismissed" in page and 'value="0"' in page  # restore form present
+    assert page.index("Dismissed") < page.index(title)   # only in the Dismissed section
+    assert title in client.get("/study", headers=admin).text  # admin unaffected
+    client.post("/study/00-welcome/hidden", headers=kid, data={"hidden": "0"})
+    page = client.get("/study", headers=kid).text
+    assert "Dismissed" not in page and title in page
+
+
+def test_admin_audience_controls_who_sees_a_guide(client, admin, kid):
+    with db.get_conn() as conn:
+        ids = {r["email"]: r["id"] for r in conn.execute("SELECT id, email FROM users")}
+    # Only the admin keeps the guide -> kid's list loses it, learned state untouched.
+    client.post("/study/00-welcome/learned", headers=kid, data={"learned": "1"})
+    client.post("/study/00-welcome/audience", headers=admin,
+                data={"visible_ids": [str(ids["parent@test.local"])]})
+    kid_page = client.get("/study", headers=kid).text
+    assert "Dismissed" in kid_page
+    assert kid_page.index("Dismissed") < kid_page.index("How study guides work")
+    assert "Dismissed" not in client.get("/study", headers=admin).text
+    with db.get_conn() as conn:  # learned_at survived the audience change
+        assert conn.execute(
+            "SELECT learned_at FROM study_progress WHERE user_id = ? AND slug = '00-welcome'",
+            (ids["kid@test.local"],)).fetchone()["learned_at"]
+    # Re-adding the kid restores it (back to Learned, since they'd marked it).
+    client.post("/study/00-welcome/audience", headers=admin,
+                data={"visible_ids": [str(i) for i in ids.values()]})
+    assert "Dismissed" not in client.get("/study", headers=kid).text
+
+
+def test_audience_route_is_admin_gated(client, admin, kid):
+    client.post("/study/00-welcome/audience", headers=kid, data={"visible_ids": []})
+    assert "Dismissed" not in client.get("/study", headers=admin).text
+
+
 # --- sanitiser unit coverage --------------------------------------------------
 def test_parse_draft_strips_think_variants_and_fences():
     for tag in ("think", "thinking"):

@@ -21,7 +21,15 @@
       <a href="/study/{{ g.slug }}" class="study-title"><strong>{{ g.title }}</strong></a>
       {% if g.summary %}<p class="muted small">{{ g.summary }}</p>{% endif %}
     </div>
-    <a href="/study/{{ g.slug }}" class="btn primary">Read →</a>
+    <div class="row-actions">
+      <a href="/study/{{ g.slug }}" class="btn primary">Read →</a>
+      <form method="post" action="/study/{{ g.slug }}/hidden"
+            title="Remove from my list (it isn't deleted — restore it any time)">
+        <input type="hidden" name="hidden" value="1">
+        <input type="hidden" name="back" value="/study">
+        <button type="submit" class="btn small">✕ Not for me</button>
+      </form>
+    </div>
   </div>
   {% endfor %}
 </div>
@@ -46,6 +54,24 @@
         <input type="hidden" name="learned" value="0">
         <input type="hidden" name="back" value="/study">
         <button type="submit" class="btn small">↩ Mark unlearned</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
+{% if dismissed %}
+<details class="study-done">
+  <summary><strong>Dismissed</strong> <span class="muted">({{ dismissed|length }})</span></summary>
+  <div class="stack" style="margin-top: .75rem">
+    {% for g in dismissed %}
+    <div class="card row-between done-row">
+      <a href="/study/{{ g.slug }}" class="study-title muted">{{ g.title }}</a>
+      <form method="post" action="/study/{{ g.slug }}/hidden">
+        <input type="hidden" name="hidden" value="0">
+        <input type="hidden" name="back" value="/study">
+        <button type="submit" class="btn small">↩ Restore</button>
       </form>
     </div>
     {% endfor %}
