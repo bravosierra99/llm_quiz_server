@@ -2,7 +2,7 @@
 title: Grade 2 — Word Building (Prefixes, Suffixes & Endings)
 summary: Prefixes like un- and re-, suffixes like -ful and -less, the three sounds of -ed, and the spelling rules for adding endings.
 order: 33
-audience: jessica
+audience: jdsmith5999@gmail.com
 ---
 
 # Grade 2 — Word Building (Prefixes, Suffixes & Endings)

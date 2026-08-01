@@ -2,7 +2,7 @@
 title: Grade 2 — Reading Stories, Fables & Poems
 summary: Story elements, how characters change, morals of famous fables, points of view, comparing story versions, and poem words like rhyme and alliteration.
 order: 34
-audience: jessica
+audience: jdsmith5999@gmail.com
 ---
 
 # Grade 2 — Reading Stories, Fables & Poems

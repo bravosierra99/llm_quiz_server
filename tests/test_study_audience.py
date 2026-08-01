@@ -6,7 +6,8 @@ The audience tests lean on the real shipped grade2-*.md guides, which carry
 from app import db, importer, study
 from tests.conftest import ADMIN_H
 
-JESS_H = {"Cf-Access-Authenticated-User-Email": "jessica@test.local"}
+# Jessica's real CF identity — what the shipped grade2-*.md audience names.
+JESS_H = {"Cf-Access-Authenticated-User-Email": "jdsmith5999@gmail.com"}
 
 A_GUIDE = "Grade 2 — Word Detective (Vocabulary)"
 
@@ -27,7 +28,7 @@ def test_audience_match_rules():
 
 def test_grade2_guides_declare_jessica_audience():
     g = study.get_guide("grade2-vowels")
-    assert g["audience"] == ("jessica",)
+    assert g["audience"] == ("jdsmith5999@gmail.com",)
 
 
 # --- the study list ---------------------------------------------------------
@@ -37,10 +38,33 @@ def test_scoped_guide_hidden_from_other_learners(client, kid):
 
 
 def test_scoped_guide_visible_to_named_learner(client, admin):
-    client.get("/", headers=JESS_H)  # creates the 'jessica' user
+    client.get("/", headers=JESS_H)  # creates Jessica's user
     r = client.get("/study", headers=JESS_H)
     assert A_GUIDE in r.text
     assert "Scoped to others" not in r.text
+
+
+def test_home_count_agrees_with_study_page(client, admin, kid):
+    """Regression: the home-page 'N study guides to read' banner must count the
+    SAME guides the study page lists — audience-scoped guides excluded."""
+    client.get("/", headers=JESS_H)
+    kid_home = client.get("/", headers=kid).text
+    jess_home = client.get("/", headers=JESS_H).text
+
+    def count(html):
+        import re
+        m = re.search(r"You have <strong>(\d+)</strong> study guide", html)
+        return int(m.group(1)) if m else 0
+
+    def listed(headers):
+        html = client.get("/study", headers=headers).text
+        return html.count('class="study-title"><strong>')
+
+    assert count(kid_home) == listed(kid)
+    assert count(jess_home) == listed(JESS_H)
+    # And Jessica genuinely has more on her plate than the kid (the ten
+    # grade-2 guides are hers alone).
+    assert count(jess_home) == count(kid_home) + 10
 
 
 def test_admin_sees_scoped_section_not_personal_list(client, admin):

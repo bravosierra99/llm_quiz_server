@@ -2,7 +2,7 @@
 title: Grade 2 — Word Detective (Vocabulary)
 summary: Five ways to figure out new words — context clues, prefixes, roots, compound words, and the dictionary — plus homophones and shades of meaning.
 order: 38
-audience: jessica
+audience: jdsmith5999@gmail.com
 ---
 
 # Grade 2 — Word Detective (Vocabulary)

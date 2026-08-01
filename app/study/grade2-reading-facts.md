@@ -2,7 +2,7 @@
 title: Grade 2 — Reading for Facts (Informational Text)
 summary: Main topic, text features like the glossary and index, author's purpose, sequence, cause and effect, and fact vs. opinion.
 order: 35
-audience: jessica
+audience: jdsmith5999@gmail.com
 ---
 
 # Grade 2 — Reading for Facts (Informational Text)

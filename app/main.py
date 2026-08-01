@@ -199,9 +199,8 @@ def index(request: Request):
         has_content = conn.execute(
             """SELECT 1 FROM collection_nodes cn JOIN collections c ON c.id = cn.collection_id
                WHERE c.user_id = ? LIMIT 1""", (user["id"],)).fetchone()
-        learned = _learned_slugs(conn, user["id"])
-        skip = learned | _hidden_slugs(conn, user["id"])
-        study_to_read = sum(1 for g in study.list_guides(conn) if g["slug"] not in skip)
+        mine, _, learned, hidden = _user_guides(conn, user)
+        study_to_read = sum(1 for g in mine if g["slug"] not in learned | hidden)
     summary = dict(totals)
     summary["pct"] = (round(summary["correct"] / summary["answered"] * 100)
                       if summary["answered"] else None)
@@ -1284,6 +1283,27 @@ def tutor_generate(request: Request, question_id: int, back: str = Form("")):
 # Study guides — whole-topic learning material (Claude-authored markdown files),
 # readable in-app, with a per-user "learned" flag. See app/study.py + db.py.
 # --------------------------------------------------------------------------
+def _user_guides(conn, user):
+    """The guide catalog exactly as THIS user's study page sees it, so every
+    surface (the /study lists, the home-page count) agrees. Returns
+    (mine, scoped, learned, hidden): `mine` are the user's guides; `scoped`
+    are guides addressed to someone else by frontmatter and not overridden by
+    any recorded decision (admin audience editor / personal dismiss)."""
+    guides = study.list_guides(conn)
+    learned = _learned_slugs(conn, user["id"])
+    hidden = _hidden_slugs(conn, user["id"])
+    curated = {r["slug"] for r in conn.execute(
+        "SELECT slug FROM study_progress WHERE user_id = ?", (user["id"],))}
+    mine, scoped = [], []
+    for g in guides:
+        if (g["slug"] not in curated
+                and not study.audience_match(g.get("audience"), user)):
+            scoped.append(g)
+        else:
+            mine.append(g)
+    return mine, scoped, learned, hidden
+
+
 def _learned_slugs(conn, user_id):
     return {r["slug"] for r in conn.execute(
         "SELECT slug FROM study_progress WHERE user_id = ? AND learned_at IS NOT NULL",
@@ -1315,13 +1335,7 @@ def study_index(request: Request):
     if redirect:
         return redirect
     with get_conn() as conn:
-        guides = study.list_guides(conn)
-        learned = _learned_slugs(conn, user["id"])
-        hidden = _hidden_slugs(conn, user["id"])
-        # Any recorded decision (admin audience editor, personal dismiss/learn)
-        # overrides a guide's file-declared default audience.
-        curated = {r["slug"] for r in conn.execute(
-            "SELECT slug FROM study_progress WHERE user_id = ?", (user["id"],))}
+        guides, scoped, learned, hidden = _user_guides(conn, user)
         # Each open request carries its drafting state so the list can say
         # "drafting…" / "draft awaiting review" instead of looking stuck.
         req_sql = """
@@ -1340,14 +1354,8 @@ def study_index(request: Request):
         else:
             reqs = [dict(r) for r in conn.execute(
                 req_sql.format(who="AND sr.user_id = ?"), (user["id"],))]
-    # A guide addressed to someone else (by frontmatter, absent any DB row for
-    # this user) leaves the personal lists entirely; admins keep it in a
-    # collapsed section so they can still open and re-curate it.
-    def addressed_elsewhere(g):
-        return (g["slug"] not in curated
-                and not study.audience_match(g.get("audience"), user))
-    scoped = [g for g in guides if addressed_elsewhere(g)]
-    guides = [g for g in guides if not addressed_elsewhere(g)]
+    # Guides addressed to someone else are out of the personal lists; admins
+    # keep them in a collapsed section so they can still open and re-curate.
     to_read = [g for g in guides if g["slug"] not in learned | hidden]
     done = [g for g in guides if g["slug"] in learned and g["slug"] not in hidden]
     dismissed = [g for g in guides if g["slug"] in hidden]
