@@ -1318,6 +1318,10 @@ def study_index(request: Request):
         guides = study.list_guides(conn)
         learned = _learned_slugs(conn, user["id"])
         hidden = _hidden_slugs(conn, user["id"])
+        # Any recorded decision (admin audience editor, personal dismiss/learn)
+        # overrides a guide's file-declared default audience.
+        curated = {r["slug"] for r in conn.execute(
+            "SELECT slug FROM study_progress WHERE user_id = ?", (user["id"],))}
         # Each open request carries its drafting state so the list can say
         # "drafting…" / "draft awaiting review" instead of looking stuck.
         req_sql = """
@@ -1336,11 +1340,20 @@ def study_index(request: Request):
         else:
             reqs = [dict(r) for r in conn.execute(
                 req_sql.format(who="AND sr.user_id = ?"), (user["id"],))]
+    # A guide addressed to someone else (by frontmatter, absent any DB row for
+    # this user) leaves the personal lists entirely; admins keep it in a
+    # collapsed section so they can still open and re-curate it.
+    def addressed_elsewhere(g):
+        return (g["slug"] not in curated
+                and not study.audience_match(g.get("audience"), user))
+    scoped = [g for g in guides if addressed_elsewhere(g)]
+    guides = [g for g in guides if not addressed_elsewhere(g)]
     to_read = [g for g in guides if g["slug"] not in learned | hidden]
     done = [g for g in guides if g["slug"] in learned and g["slug"] not in hidden]
     dismissed = [g for g in guides if g["slug"] in hidden]
     return render(request, "study_list.html", to_read=to_read, done=done,
-                  dismissed=dismissed, requests=reqs)
+                  dismissed=dismissed, requests=reqs,
+                  scoped=scoped if user.get("is_admin") else [])
 
 
 @app.get("/study/{slug}", response_class=HTMLResponse)
@@ -1352,14 +1365,21 @@ def study_guide(request: Request, slug: str):
         guide = study.get_guide(slug, conn)
         learned = slug in _learned_slugs(conn, user["id"])
         # Admins curate who sees this guide (checked = on that person's page).
+        # A user with no study_progress row falls back to the guide's
+        # file-declared audience, so the checkboxes show the EFFECTIVE state.
         audience = [dict(r) for r in conn.execute(
-            """SELECT u.id, u.name,
-                      (sp.hidden_at IS NOT NULL) AS is_hidden
+            """SELECT u.id, u.name, u.email,
+                      (sp.hidden_at IS NOT NULL) AS is_hidden,
+                      (sp.user_id IS NOT NULL) AS has_row
                FROM users u LEFT JOIN study_progress sp
                     ON sp.user_id = u.id AND sp.slug = ?
                ORDER BY u.name""", (slug,))] if user.get("is_admin") else []
     if not guide:
         return RedirectResponse("/study", status_code=303)
+    for row in audience:
+        if not row["has_row"]:
+            row["is_hidden"] = not study.audience_match(
+                guide.get("audience"), row)
     return render(request, "study_guide.html", guide=guide, learned=learned,
                   audience=audience)
 
@@ -1714,6 +1734,22 @@ def _user_rollups(conn):
     return rows
 
 
+def _topic_recency(conn, user_id):
+    """root_topic_id -> the user's most recent answer timestamp anywhere in that
+    topic's subtree. Topics the user never touched simply aren't in the dict."""
+    recency = {}
+    for r in conn.execute(
+            """SELECT q.chapter_id AS node_id, MAX(a.answered_at) AS last
+               FROM answers a
+               JOIN quiz_sessions s ON s.id = a.session_id AND s.user_id = ?
+               JOIN questions q ON q.id = a.question_id
+               GROUP BY q.chapter_id""", (user_id,)):
+        rid = db.node_root_id(conn, r["node_id"])
+        if rid is not None and r["last"] > recency.get(rid, ""):
+            recency[rid] = r["last"]
+    return recency
+
+
 def _analytics_context(conn, viewer, scope_user=None):
     """Assemble everything analytics.html needs.
 
@@ -1722,10 +1758,20 @@ def _analytics_context(conn, viewer, scope_user=None):
     user, so it's scoped to `scope_user or viewer` (the admin's own progress by
     default, a learner's when drilled in). The curation tools (struggle questions,
     question bank) stay fleet-wide on the default page and scope to the learner on
-    a drill-down. The flagged queue and per-user roster are fleet-only."""
+    a drill-down. The flagged queue and per-user roster are fleet-only.
+
+    Topic lists are ordered by the scoped person's recency — the topic they
+    quizzed on most recently first, never-touched topics alphabetical at the
+    end — so the page opens on what they're actually working on instead of
+    whatever sorts first alphabetically."""
     progress = _subject_progress(conn, (scope_user or viewer)["id"])
     cur_uid = scope_user["id"] if scope_user else None
     subjects, weak = _question_stats(conn, cur_uid)
+    recency = _topic_recency(conn, (scope_user or viewer)["id"])
+    # Stable sorts: both lists arrive alphabetical, which survives as the
+    # tie-break for topics with no activity ('' sorts together, last).
+    progress.sort(key=lambda t: recency.get(t["id"], ""), reverse=True)
+    subjects.sort(key=lambda s: recency.get(s["id"], ""), reverse=True)
     ctx = {"progress": progress, "subjects": subjects, "weak": weak,
            "scope_user": scope_user}
     if scope_user is None:

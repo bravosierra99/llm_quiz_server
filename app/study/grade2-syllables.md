@@ -2,6 +2,7 @@
 title: Grade 2 — Reading Big Words (Syllables)
 summary: How to chop a big word into syllables, the six syllable types, and how to know if each vowel is long or short.
 order: 32
+audience: jessica
 ---
 
 # Grade 2 — Reading Big Words (Syllables)

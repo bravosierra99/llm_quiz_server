@@ -2,6 +2,7 @@
 title: Grade 2 — Long Vowels, Silent E & Vowel Teams
 summary: How to tell long and short vowels apart, what the magic silent e does, and the two-letter vowel teams like ai, ee, oa, and igh.
 order: 30
+audience: jessica
 ---
 
 # Grade 2 — Long Vowels, Silent E & Vowel Teams

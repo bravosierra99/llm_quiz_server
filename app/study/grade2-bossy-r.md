@@ -2,6 +2,7 @@
 title: Grade 2 — Bossy R & Tricky Spellings
 summary: R-controlled vowels (ar, or, er, ir, ur), soft c and g, silent letters, and the -ck / -tch / -dge spelling patterns.
 order: 31
+audience: jessica
 ---
 
 # Grade 2 — Bossy R & Tricky Spellings

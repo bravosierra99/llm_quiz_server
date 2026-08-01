@@ -79,6 +79,21 @@
 </details>
 {% endif %}
 
+{% if scoped %}
+<details class="study-done">
+  <summary><strong>Scoped to others</strong> <span class="muted">({{ scoped|length }})</span>
+    <span class="muted small">— admin view; not on your list</span></summary>
+  <div class="stack" style="margin-top: .75rem">
+    {% for g in scoped %}
+    <div class="card row-between done-row">
+      <a href="/study/{{ g.slug }}" class="study-title muted">{{ g.title }}</a>
+      <span class="muted small">for {{ g.audience | join(', ') }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
 <hr>
 
 <section>

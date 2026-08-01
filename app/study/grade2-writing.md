@@ -2,6 +2,7 @@
 title: Grade 2 — The Three Kinds of Writing
 summary: Opinion, informative, and narrative writing — what each one needs, the linking and time-order words, and revising vs. editing.
 order: 39
+audience: jessica
 ---
 
 # Grade 2 — The Three Kinds of Writing

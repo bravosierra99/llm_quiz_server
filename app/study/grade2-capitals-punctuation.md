@@ -2,6 +2,7 @@
 title: Grade 2 — Capitals, Commas & Apostrophes
 summary: What gets a capital letter (holidays, brands, places), commas in friendly letters, contractions, possessives, and the its/it's trap.
 order: 37
+audience: jessica
 ---
 
 # Grade 2 — Capitals, Commas & Apostrophes

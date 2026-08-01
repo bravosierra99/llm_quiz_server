@@ -2,6 +2,7 @@
 title: Grade 2 — Grammar (Plurals, Pronouns, Past Tense & Sentences)
 summary: Collective nouns, irregular plurals like feet and mice, reflexive pronouns, irregular past-tense verbs, adjectives vs. adverbs, and compound sentences.
 order: 36
+audience: jessica
 ---
 
 # Grade 2 — Grammar (Plurals, Pronouns, Past Tense & Sentences)

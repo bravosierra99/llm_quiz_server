@@ -12,9 +12,15 @@ The DB additionally holds a per-user "learned" flag (keyed by slug, same for bot
 kinds) and the request inbox; see db.py.
 
 A guide file is plain markdown. An optional leading ``---`` frontmatter block may
-set ``title``/``summary``/``order``; everything is graceful — a file that just
-starts with ``# Heading`` (like the existing research KBs) parses fine, taking its
-title from that first H1 and falling back to the prettified filename.
+set ``title``/``summary``/``order``/``audience``; everything is graceful — a file
+that just starts with ``# Heading`` (like the existing research KBs) parses fine,
+taking its title from that first H1 and falling back to the prettified filename.
+
+``audience`` is the guide's DEFAULT visibility: a comma-separated list of user
+names (or email local parts), matched case-insensitively. Empty/absent means
+everyone. It only applies to a user with no ``study_progress`` row for the slug —
+any recorded decision (the admin audience editor, a personal dismiss) wins, so
+curation in the UI is never fought by a redeploy.
 """
 import os
 import re
@@ -61,6 +67,23 @@ def _parse_frontmatter(text):
     return meta, text
 
 
+def _parse_audience(value):
+    """'Jessica, ben' -> ('jessica', 'ben'). Empty/absent -> () = everyone."""
+    return tuple(t.strip().lower() for t in (value or "").split(",") if t.strip())
+
+
+def audience_match(audience, user):
+    """Does the guide's file-declared audience include this user? An empty
+    audience means everyone. Matches the user's name or email local part,
+    case-insensitively, so 'jessica' covers both the picker profile name and a
+    jessica@… Cloudflare identity."""
+    if not audience:
+        return True
+    name = (user.get("name") or "").strip().lower()
+    local = (user.get("email") or "").split("@")[0].strip().lower()
+    return name in audience or (bool(local) and local in audience)
+
+
 def _first_h1(body):
     for line in body.splitlines():
         if line.startswith("# "):
@@ -87,6 +110,7 @@ def _read(filename):
         "title": title,
         "summary": meta.get("summary", ""),
         "order": order,
+        "audience": _parse_audience(meta.get("audience")),
         "body": body,
     }
 
@@ -104,7 +128,8 @@ def _catalog():
                 g = _read(fn)
             except OSError:
                 continue
-            guides.append({k: g[k] for k in ("slug", "title", "summary", "order")})
+            guides.append({k: g[k] for k in
+                           ("slug", "title", "summary", "order", "audience")})
     guides.sort(key=lambda g: (g["order"], g["title"].lower()))
     return guides
 
@@ -120,7 +145,8 @@ def list_guides(conn=None):
                 "WHERE status = 'published'"):
             if r["slug"] not in file_slugs:
                 guides.append({"slug": r["slug"], "title": r["title"],
-                               "summary": r["summary"], "order": 10_000})
+                               "summary": r["summary"], "order": 10_000,
+                               "audience": ()})
         guides.sort(key=lambda g: (g["order"], g["title"].lower()))
     return guides
 
