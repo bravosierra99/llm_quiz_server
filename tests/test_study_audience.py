@@ -14,13 +14,15 @@ A_GUIDE = "Grade 2 — Word Detective (Vocabulary)"
 # --- unit: matching ---------------------------------------------------------
 def test_audience_match_rules():
     assert study.audience_match((), {"name": "anyone", "email": ""})
-    aud = study._parse_audience("Jessica, ben")
-    assert aud == ("jessica", "ben")
-    assert study.audience_match(aud, {"name": "Jessica", "email": ""})
-    assert study.audience_match(aud, {"name": "someone",
-                                      "email": "jessica@x.com"})
-    assert not study.audience_match(aud, {"name": "kid",
-                                          "email": "kid@x.com"})
+    aud = study._parse_audience("Jessica, ben@example.com")
+    assert aud == ("jessica", "ben@example.com")
+    # Email is the identity: a bare token matches the local part of ANY domain;
+    # an @-token must match the whole address. Names never match (they drift).
+    assert study.audience_match(aud, {"name": "x", "email": "Jessica@y.com"})
+    assert study.audience_match(aud, {"name": "x", "email": "ben@example.com"})
+    assert not study.audience_match(aud, {"name": "x", "email": "ben@other.com"})
+    assert not study.audience_match(aud, {"name": "Jessica", "email": ""})
+    assert not study.audience_match(aud, {"name": "kid", "email": "kid@x.com"})
 
 
 def test_grade2_guides_declare_jessica_audience():

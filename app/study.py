@@ -16,11 +16,13 @@ set ``title``/``summary``/``order``/``audience``; everything is graceful — a f
 that just starts with ``# Heading`` (like the existing research KBs) parses fine,
 taking its title from that first H1 and falling back to the prettified filename.
 
-``audience`` is the guide's DEFAULT visibility: a comma-separated list of user
-names (or email local parts), matched case-insensitively. Empty/absent means
-everyone. It only applies to a user with no ``study_progress`` row for the slug —
-any recorded decision (the admin audience editor, a personal dismiss) wins, so
-curation in the UI is never fought by a redeploy.
+``audience`` is the guide's DEFAULT visibility: a comma-separated list of email
+local parts or full addresses (``jessica`` or ``jessica@example.com``), matched
+case-insensitively against the user's email — the stable Cloudflare Access
+identity. Empty/absent means everyone. It only applies to a user with no
+``study_progress`` row for the slug — any recorded decision (the admin audience
+editor, a personal dismiss) wins, so curation in the UI is never fought by a
+redeploy.
 """
 import os
 import re
@@ -74,14 +76,19 @@ def _parse_audience(value):
 
 def audience_match(audience, user):
     """Does the guide's file-declared audience include this user? An empty
-    audience means everyone. Matches the user's name or email local part,
-    case-insensitively, so 'jessica' covers both the picker profile name and a
-    jessica@… Cloudflare identity."""
+    audience means everyone. Matching keys on the user's EMAIL — the stable
+    Cloudflare Access identity (profile names are editable and can drift): a
+    bare token must equal the address's local part ('jessica' covers
+    jessica@any-domain), and a token containing '@' must equal the full
+    address. All case-insensitive. A user with no email (the bare-LAN profile
+    picker) never matches a scoped guide — the admin editor still works."""
     if not audience:
         return True
-    name = (user.get("name") or "").strip().lower()
-    local = (user.get("email") or "").split("@")[0].strip().lower()
-    return name in audience or (bool(local) and local in audience)
+    email = (user.get("email") or "").strip().lower()
+    if not email:
+        return False
+    local = email.split("@")[0]
+    return any(t == email if "@" in t else t == local for t in audience)
 
 
 def _first_h1(body):
