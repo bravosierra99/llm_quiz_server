@@ -113,6 +113,16 @@ them in an untracked `.env`.
 `scripts/version-bump.sh` runs all of it as its pre-release gate, and CI
 (`.github/workflows/ci.yml`) runs the same commands on every push to main.
 
+### Model eval (which LLM should quiz use?)
+
+`evals/` is quiz's suite for the household's cross-app model comparison
+(`model-eval`, in the operator's workbench). It runs the real `app/ai.py`
+functions (generate, verify, tutor, review, guide) on small fixed fixtures and
+scores them, while a proxy measures speed and thinking tokens. Run it with
+`model-eval run <model> --apps quiz`; the contract is in the operator's
+`proxmox/model-eval/README.md`. Bump `suite_version` in `evals/run.py` when
+you change `evals/fixtures.py`.
+
 ## Configuration (env / `.env`)
 
 | Var | Default | Purpose |
