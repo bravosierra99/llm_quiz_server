@@ -43,8 +43,11 @@ OUT = os.environ["MODEL_EVAL_OUT"]
 ONLY = set(filter(None, os.environ.get("MODEL_EVAL_CASES", "").split(",")))
 
 
-def mark(workflow, case):
-    req = urllib.request.Request(f"{CONTROL}/_case", data=json.dumps({"workflow": workflow, "case": case}).encode(),
+def mark(workflow, case, timeout_s=None):
+    """Tell the proxy which case the next requests belong to, and the app's own
+    timeout for them (the proxy cuts the request off there, as the app would)."""
+    body = {"workflow": workflow, "case": case, "timeout_s": timeout_s}
+    req = urllib.request.Request(f"{CONTROL}/_case", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"}, method="POST")
     urllib.request.urlopen(req, timeout=30).read()
 
@@ -187,7 +190,7 @@ def main():
         for case in wf["cases"]:
             if ONLY and f"{wf['id']}/{case['id']}" not in ONLY:
                 continue
-            mark(wf["id"], case["id"])
+            mark(wf["id"], case["id"], wf["timeout_s"])
             t0 = time.time()
             try:
                 res = wf["fn"](case)
