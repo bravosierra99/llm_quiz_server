@@ -155,7 +155,9 @@ because the 71%-equity pair folds most of the time.
 **Break-even jam:** set EV = 0 and solve for the fold frequency. BB rejamming 15bb
 with T5o over a 60% button open needs ~47% folds; a button calling with 28.8% of
 hands folds 52% of his opens — so even T5o is (barely) profitable against a
-too-wide opener who folds too much. **Wide ranges are hard to defend.**
+too-wide opener who folds too much. **Wide ranges are hard to defend.** (The
+book's closing line says the minimum is 51%; its own inputs — win 4.625bb when
+he folds, 31% equity in a 31.625bb pot for 14bb more — give ~47.6%.)
 
 ## Equity realization (EqR)
 
